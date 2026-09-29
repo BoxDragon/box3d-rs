@@ -7,7 +7,8 @@
 //!
 //! # Ownership model
 //! - [`World`] owns the native world. Dropping it destroys every body, shape
-//!   and joint in it. Nothing else has a destroying `Drop`.
+//!   and joint in it. Nothing else destroys simulation objects on `Drop`
+//!   ([`Hull`], [`Mesh`] and [`HeightField`] only free their own geometry).
 //! - [`BodyId`], [`ShapeId`], [`JointId`] (8 bytes, `repr(transparent)` over
 //!   the C ids) and the typed joint ids such as [`DistanceJointId`] are `Copy`
 //!   handles with no registry behind them. They are **generational**: once
@@ -26,13 +27,38 @@
 //! - User data is a plain `u64` on bodies, shapes and joints (for example a
 //!   hecs `Entity::to_bits()`). The wrapper never stores pointers there.
 //!
+//! # Meshes and height fields
+//! [`Hull`]s are copied into the world, but Box3D keeps a *raw pointer* to
+//! the `b3MeshData` / `b3HeightFieldData` of every mesh or height-field
+//! shape. [`Mesh`] and [`HeightField`] are therefore immutable,
+//! reference-counted (`Arc`) handles: `Clone` is cheap, one mesh can back any
+//! number of shapes (each with its own scale) in any number of worlds, and
+//! [`World::create_mesh_shape`] / [`World::create_height_field_shape`] store
+//! a clone in the world. That clone is released when the shape is destroyed
+//! directly, with its body, through the destroy queue, or with the world, so
+//! dropping your handle right after creating shapes is fine. Releasing
+//! happens in `destroy_*` / [`World::flush_destroys`], never inside the
+//! solver step, and never allocates. Height fields are static-only (creating
+//! one on a non-static body panics, as does making its body non-static);
+//! meshes are allowed on any body type, as in Box3D, but only collide
+//! properly when static. Shapes created through [`sys`] directly are not
+//! tracked: keeping their geometry alive is up to you.
+//!
+//! # Character mover
+//! [`World::collide_mover`], [`World::cast_mover`], [`solve_planes`] and
+//! [`clip_vector`] wrap Box3D's kinematic capsule mover. The plane types are
+//! `repr(C)` and layout-identical to the C ones, so the solver works in place
+//! on a caller-owned `&mut [CollisionPlane]` and a mover update allocates
+//! nothing.
+//!
 //! # Events and queries
 //! [`World::body_events`], [`World::contact_events`],
 //! [`World::sensor_events`] and [`World::joint_events`] return slices that
 //! borrow Box3D's own buffers: no copy, no allocation. Because
 //! [`World::step`] takes `&mut self`, the borrow checker stops them from
 //! outliving the step. Callback queries ([`World::cast_ray`],
-//! [`World::cast_shape`], [`World::overlap_aabb`], [`World::overlap_shape`])
+//! [`World::cast_shape`], [`World::overlap_aabb`], [`World::overlap_shape`],
+//! [`World::collide_mover`], [`World::cast_mover_filtered`])
 //! take a generic closure passed to C through a monomorphized trampoline;
 //! nothing is boxed.
 //!
@@ -45,7 +71,7 @@
 //!
 //! # FFI safety
 //! All `unsafe` is confined to calls into [`sys`]. Rust callbacks called by C
-//! (queries, custom filter, pre-solve) catch panics at the boundary; the
+//! (queries, mover callbacks, custom filter, pre-solve) catch panics at the boundary; the
 //! panic is resumed on the Rust side once the C call returns. The one
 //! `unsafe` public function is [`set_allocator`], whose contract the
 //! compiler cannot check.
@@ -56,10 +82,13 @@ pub use glam::{Mat3, Quat, Vec3};
 
 mod body;
 mod events;
+mod height_field;
 mod hull;
 mod id;
 mod joint;
 mod math;
+mod mesh;
+mod mover;
 mod query;
 mod shape;
 mod world;
@@ -69,6 +98,7 @@ pub use events::{
     BodyEvents, BodyMoveEvent, ContactBeginEvent, ContactEndEvent, ContactEvents, ContactHitEvent, JointEvent,
     JointEvents, SensorBeginEvent, SensorEndEvent, SensorEvents,
 };
+pub use height_field::{HEIGHT_FIELD_HOLE, HeightField, HeightFieldDef};
 pub use hull::Hull;
 pub use id::{BodyId, JointId, ShapeId, WorldId};
 pub use joint::{
@@ -77,6 +107,11 @@ pub use joint::{
     WheelJointId,
 };
 pub use math::{Pos, Transform};
+pub use mesh::{Mesh, MeshDef};
+pub use mover::{
+    BodyPlaneResult, Capsule, CollisionPlane, MoverHit, Plane, PlaneResult, PlaneSolverResult, clip_vector,
+    solve_planes,
+};
 pub use query::{QueryFilter, RayHit, ShapeProxy};
 pub use shape::{Filter, ShapeDef, ShapeType, SurfaceMaterial};
 pub use world::{AllocFn, Capacity, FreeFn, World, WorldDef, bytes_allocated, set_allocator};
@@ -88,6 +123,9 @@ pub enum Error {
     TooManyWorlds,
     /// Hull construction failed (degenerate input or limits exceeded).
     HullCreationFailed,
+    /// Mesh construction failed (e.g. every triangle is degenerate, or the
+    /// BVH got too deep).
+    MeshCreationFailed,
     /// An argument was out of the range Box3D accepts.
     InvalidArgument(&'static str),
     /// [`set_allocator`] was called while Box3D still held memory.
@@ -99,6 +137,7 @@ impl core::fmt::Display for Error {
         match self {
             Error::TooManyWorlds => write!(f, "too many Box3D worlds (max {})", sys::B3_MAX_WORLDS),
             Error::HullCreationFailed => write!(f, "Box3D hull creation failed"),
+            Error::MeshCreationFailed => write!(f, "Box3D mesh creation failed"),
             Error::InvalidArgument(what) => write!(f, "invalid argument: {what}"),
             Error::AllocatorBusy => write!(f, "Box3D allocator can only be replaced while nothing is allocated"),
         }

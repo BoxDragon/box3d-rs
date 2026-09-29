@@ -166,6 +166,8 @@ impl World {
         let b = self.body(id);
         // SAFETY: validated id.
         unsafe { sys::b3DestroyBody(b) }
+        // Release meshes / height fields only used by this body's shapes.
+        self.prune_resources();
     }
 
     #[track_caller]
@@ -175,9 +177,19 @@ impl World {
     }
 
     /// Change the body type (expensive). Updates mass properties.
+    ///
+    /// # Panics
+    /// If the id is stale/foreign, or if the body carries a height-field shape
+    /// and `body_type` is not [`BodyType::Static`]. (Box3D does not support
+    /// that change, and its early return in `b3Body_SetType` would leave the
+    /// world permanently locked.)
     #[track_caller]
     pub fn set_body_type(&mut self, id: BodyId, body_type: BodyType) {
         let b = self.body(id);
+        assert!(
+            body_type == BodyType::Static || !self.body_has_height_field(id),
+            "a body with a height-field shape must stay static"
+        );
         // SAFETY: validated id.
         unsafe { sys::b3Body_SetType(b, body_type.to_raw()) }
     }

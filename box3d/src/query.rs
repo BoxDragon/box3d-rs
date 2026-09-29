@@ -27,7 +27,7 @@ impl Default for QueryFilter {
 }
 
 impl QueryFilter {
-    fn to_raw(self) -> sys::b3QueryFilter {
+    pub(crate) fn to_raw(self) -> sys::b3QueryFilter {
         // SAFETY: returns a value; the recording name stays null.
         let mut f = unsafe { sys::b3DefaultQueryFilter() };
         f.categoryBits = self.category_bits;
@@ -80,13 +80,13 @@ impl<'a> ShapeProxy<'a> {
     }
 }
 
-struct Ctx<'f, F> {
-    f: &'f mut F,
-    panic: Option<Box<dyn Any + Send>>,
+pub(crate) struct Ctx<'f, F> {
+    pub(crate) f: &'f mut F,
+    pub(crate) panic: Option<Box<dyn Any + Send>>,
 }
 
 impl<F> Ctx<'_, F> {
-    fn finish(self) {
+    pub(crate) fn finish(self) {
         if let Some(p) = self.panic {
             resume_unwind(p);
         }
@@ -126,7 +126,10 @@ unsafe extern "C" fn cast_tramp<F: FnMut(&RayHit) -> f32>(
     }
 }
 
-unsafe extern "C" fn overlap_tramp<F: FnMut(ShapeId) -> bool>(shape: sys::b3ShapeId, ctx: *mut c_void) -> bool {
+pub(crate) unsafe extern "C" fn overlap_tramp<F: FnMut(ShapeId) -> bool>(
+    shape: sys::b3ShapeId,
+    ctx: *mut c_void,
+) -> bool {
     // SAFETY: ctx is the &mut Ctx<F> passed by the enclosing query call.
     let ctx = unsafe { &mut *(ctx as *mut Ctx<'_, F>) };
     if ctx.panic.is_some() {

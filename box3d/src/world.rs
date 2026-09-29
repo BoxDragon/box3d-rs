@@ -210,6 +210,13 @@ unsafe extern "C" fn pre_solve_tramp(
     }
 }
 
+/// Geometry Box3D references by raw pointer from a shape, kept alive by the
+/// world until the shape is gone.
+pub(crate) enum Resource {
+    Mesh(crate::Mesh),
+    HeightField(crate::HeightField),
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Destroy {
     Body(BodyId),
@@ -228,6 +235,9 @@ pub struct World {
     pub(crate) id: sys::b3WorldId,
     callbacks: Box<Callbacks>,
     destroy_queue: Vec<Destroy>,
+    /// One entry per mesh / height-field shape (see [`Resource`]). Pruned when
+    /// shapes or bodies are destroyed, never during `step`.
+    resources: Vec<(ShapeId, Resource)>,
     _not_sync: PhantomData<Cell<()>>,
 }
 
@@ -248,7 +258,7 @@ impl World {
         if id.index1 == 0 {
             return Err(Error::TooManyWorlds);
         }
-        Ok(World { id, callbacks, destroy_queue, _not_sync: PhantomData })
+        Ok(World { id, callbacks, destroy_queue, resources: Vec::new(), _not_sync: PhantomData })
     }
 
     pub fn id(&self) -> WorldId {
@@ -317,6 +327,9 @@ impl World {
     /// Destroy everything queued. Ids that are already invalid (e.g. a shape
     /// whose body was destroyed earlier in the queue) are skipped silently.
     pub fn flush_destroys(&mut self) {
+        if self.destroy_queue.is_empty() {
+            return;
+        }
         let mut queue = core::mem::take(&mut self.destroy_queue);
         for cmd in queue.drain(..) {
             match cmd {
@@ -336,6 +349,35 @@ impl World {
             }
         }
         self.destroy_queue = queue;
+        self.prune_resources();
+    }
+
+    // ---- mesh / height-field keepalive -----------------------------------
+
+    /// Keep `resource` alive for as long as `shape` exists.
+    pub(crate) fn retain_resource(&mut self, shape: ShapeId, resource: Resource) {
+        self.resources.push((shape, resource));
+    }
+
+    /// Release meshes / height fields whose shape no longer exists. Must run
+    /// only *after* Box3D destroyed the shapes. Never allocates.
+    pub(crate) fn prune_resources(&mut self) {
+        if self.resources.is_empty() {
+            return;
+        }
+        let world0 = self.index0();
+        // SAFETY: b3Shape_IsValid accepts any id; see is_body_valid.
+        self.resources.retain(|(s, _)| s.world0() == world0 && unsafe { sys::b3Shape_IsValid(s.0) });
+    }
+
+    /// True if `body` carries a height-field shape created through this API.
+    pub(crate) fn body_has_height_field(&self, body: BodyId) -> bool {
+        self.resources.iter().any(|(s, r)| {
+            matches!(r, Resource::HeightField(_))
+                && self.is_shape_valid(*s)
+                // SAFETY: validated shape id.
+                && BodyId(unsafe { sys::b3Shape_GetBody(s.0) }) == body
+        })
     }
 
     // ---- settings --------------------------------------------------------
@@ -485,5 +527,38 @@ impl Drop for World {
 impl core::fmt::Debug for World {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("World").field("id", &self.id()).finish()
+    }
+}
+
+/// Mesh / height-field lookup.
+impl World {
+    /// The mesh of a mesh shape created with
+    /// [`World::create_mesh_shape`](crate::World::create_mesh_shape) (a new
+    /// handle to the same data). `None` for other shapes.
+    ///
+    /// # Panics
+    /// If the id is stale or foreign.
+    #[track_caller]
+    pub fn shape_mesh(&self, id: ShapeId) -> Option<crate::Mesh> {
+        self.shape(id);
+        self.resources.iter().find_map(|(s, r)| match r {
+            Resource::Mesh(m) if *s == id => Some(m.clone()),
+            _ => None,
+        })
+    }
+
+    /// The height field of a shape created with
+    /// [`World::create_height_field_shape`](crate::World::create_height_field_shape).
+    /// `None` for other shapes.
+    ///
+    /// # Panics
+    /// If the id is stale or foreign.
+    #[track_caller]
+    pub fn shape_height_field(&self, id: ShapeId) -> Option<crate::HeightField> {
+        self.shape(id);
+        self.resources.iter().find_map(|(s, r)| match r {
+            Resource::HeightField(h) if *s == id => Some(h.clone()),
+            _ => None,
+        })
     }
 }

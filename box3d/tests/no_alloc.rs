@@ -141,6 +141,115 @@ fn build(impact: bool) -> World {
     w
 }
 
+/// Mesh ground (x < 0) and height-field ground (x > 0) with a 5x5 grid of
+/// awake boxes resting on each, and a wall (face at x = 16.5) for the mover. The
+/// user's Mesh / HeightField handles are dropped right away: the world keeps
+/// them alive.
+fn build_terrain() -> World {
+    let mut w = World::new(&WorldDef::default()).expect("world");
+
+    let mesh = Mesh::grid(40, 40, 1.0, true).expect("mesh"); // [-20, 20]^2
+    let g = w.create_body(&BodyDef::fixed(Pos::new(-20.0, 0.0, 0.0)));
+    w.create_mesh_shape(g, &ShapeDef::default(), &mesh, Vec3::ONE);
+    drop(mesh);
+
+    // 41 x 41 points, 1 m cells, gentle bumps, spanning x in [0, 40].
+    let n = 41u32;
+    let heights: Vec<f32> = (0..n * n)
+        .map(|i| {
+            let (x, z) = ((i % n) as f32, (i / n) as f32);
+            0.05 * (0.7 * x).sin() * (0.9 * z).cos()
+        })
+        .collect();
+    let hf = HeightField::new(&HeightFieldDef::new(&heights, n, n, Vec3::ONE).height_range(-1.0, 1.0)).expect("hf");
+    let g = w.create_body(&BodyDef::fixed(Pos::new(0.0, 0.0, -20.0)));
+    w.create_height_field_shape(g, &ShapeDef::default(), &hf);
+    drop(hf);
+
+    let wall = w.create_body(&BodyDef::fixed(Pos::new(17.0, 1.0, 0.0)));
+    w.create_box_shape(wall, &ShapeDef::default(), Vec3::new(0.5, 1.0, 10.0));
+
+    let box_def = ShapeDef::default().enable_contact_events(true);
+    let mut n = 0u64;
+    for side in [-10.0f32, 10.0] {
+        for z in 0..5 {
+            for x in 0..5 {
+                let p = Pos::new((side + x as f32 * 1.5 - 3.0).into(), 0.6, (z as f32 * 1.5 - 3.0).into());
+                let b = w.create_body(&BodyDef::dynamic(p).enable_sleep(false).user_data(n));
+                w.create_box_shape(b, &box_def, Vec3::splat(0.5));
+                n += 1;
+            }
+        }
+    }
+    w
+}
+
+/// Kinematic character (pure queries, no body) walking in a circle that
+/// crosses the mesh, the height field and the wall.
+struct Mover {
+    pos: Pos,
+    vel: Vec3,
+    time: f32,
+    capsule: Capsule,
+    planes: [CollisionPlane; 32],
+    count: usize,
+    grounded: bool,
+}
+
+impl Mover {
+    fn new() -> Self {
+        Self {
+            pos: Pos::new(16.4, 0.5, 0.0),
+            vel: Vec3::ZERO,
+            time: 0.0,
+            capsule: Capsule::standing(1.8, 0.3),
+            planes: [CollisionPlane::default(); 32],
+            count: 0,
+            grounded: false,
+        }
+    }
+
+    fn update(&mut self, w: &World) -> f64 {
+        self.time += DT;
+        // 6 m/s around a 10 m radius circle centered on (6.4, 0): x in
+        // [-3.6, 16.4], so it rubs the wall and crosses both grounds.
+        let a = 0.6 * self.time;
+        self.vel.x = -6.0 * a.sin();
+        self.vel.z = 6.0 * a.cos();
+        if self.grounded {
+            self.vel.y = 0.0;
+        }
+        self.vel.y -= 10.0 * DT;
+        let mut target = self.vel * DT;
+        let filter = QueryFilter::default();
+        for _ in 0..3 {
+            self.count = 0;
+            let (planes, count) = (&mut self.planes, &mut self.count);
+            w.collide_mover(self.pos, &self.capsule, filter, |_shape, results| {
+                for r in results {
+                    if *count < planes.len() {
+                        planes[*count] = r.to_collision_plane();
+                        *count += 1;
+                    }
+                }
+                true
+            });
+            let solved = solve_planes(target, &mut self.planes[..self.count]);
+            let fraction = w.cast_mover_filtered(self.pos, &self.capsule, solved.delta, filter, |_| true);
+            let step = solved.delta * fraction;
+            self.pos += Pos::from(step);
+            target -= step;
+            if step.length_squared() < 1e-6 {
+                break;
+            }
+        }
+        let planes = &self.planes[..self.count];
+        self.grounded = planes.iter().any(|p| p.plane.normal.y > 0.7);
+        self.vel = clip_vector(self.vel, planes);
+        self.pos.y as f64 + self.count as f64
+    }
+}
+
 #[derive(Debug, Default)]
 struct Window {
     moves: usize,
@@ -155,10 +264,12 @@ struct Window {
 }
 
 /// Warm up 120 steps, then run 600 measured steps of
-/// step + move events + contact events + 10 closure ray casts.
-fn measure(w: &mut World) -> Window {
+/// step + move events + contact events + 10 closure ray casts + `extra`
+/// (called after every step, warm-up included).
+fn measure(w: &mut World, mut extra: impl FnMut(&World) -> f64) -> Window {
     for _ in 0..120 {
         w.step(DT, SUBSTEPS);
+        extra(w);
     }
     let mut out = Window::default();
     let mut checksum = 0.0f64;
@@ -171,6 +282,7 @@ fn measure(w: &mut World) -> Window {
     ARMED.with(|a| a.set(true));
     for _ in 0..600 {
         w.step(DT, SUBSTEPS);
+        checksum += extra(w);
 
         let moves = w.body_events().moves();
         for m in moves {
@@ -230,7 +342,7 @@ fn no_alloc_steady_state() {
     // Phase 1: the steady state. 300 awake boxes resting in a wall, a
     // swinging pendulum. Both counters must be exactly zero.
     let mut w = build(false);
-    let s = measure(&mut w);
+    let s = measure(&mut w, |_| 0.0);
     report("steady", &s);
     assert!(s.moves >= 600 * 301, "wall and bob should stay awake, got {} move events", s.moves);
     assert!(s.hits >= 6000, "every ray should hit something, got {}", s.hits);
@@ -246,11 +358,35 @@ fn no_alloc_steady_state() {
     // is amortized doubling growth, so it is bounded and reported here with
     // backtraces instead of being hidden.
     let mut w = build(true);
-    let s = measure(&mut w);
+    let s = measure(&mut w, |_| 0.0);
     report("impact", &s);
     assert!(s.begins > 0 && s.ends > 0, "the bob should keep making and breaking contacts");
     assert_eq!(s.rust_allocs, 0, "Rust wrapper allocated while stepping");
     assert!(s.b3_allocs <= 8, "Box3D growth should be rare doubling, got {}: {:#?}", s.b3_allocs, s.b3_traces);
+    drop(w);
+
+    // Phase 3: mesh and height-field grounds with 50 awake boxes resting on
+    // them, rays hitting both, and a character mover update every step
+    // (collide_mover into a fixed [CollisionPlane; 32] + solve_planes +
+    // cast_mover_filtered + clip_vector). Both counters must be zero.
+    let mut w = build_terrain();
+    let mut mover = Mover::new();
+    let mut max_planes = 0;
+    let mut min_y = f32::MAX;
+    let s = measure(&mut w, |w| {
+        let r = mover.update(w);
+        max_planes = max_planes.max(mover.count);
+        min_y = min_y.min(mover.pos.y as f32);
+        r
+    });
+    report("terrain", &s);
+    println!("terrain: mover ended at {}, min feet y {min_y}, max planes {max_planes}", mover.pos);
+    assert!(s.moves >= 600 * 50, "boxes should stay awake, got {} move events", s.moves);
+    assert!(s.hits >= 6000, "rays should hit the mesh and the height field, got {}", s.hits);
+    assert!(min_y > -0.2, "mover fell through the ground: {min_y}");
+    assert!(max_planes >= 2, "mover should touch the ground and the wall");
+    assert_eq!(s.rust_allocs, 0, "Rust wrapper allocated during terrain stepping / mover updates");
+    assert_eq!(s.b3_allocs, 0, "Box3D allocated during terrain stepping / mover updates: {:#?}", s.b3_traces);
     drop(w);
 
     assert_eq!(bytes_allocated(), 0, "dropping the worlds releases everything");

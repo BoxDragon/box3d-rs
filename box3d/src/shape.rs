@@ -309,6 +309,8 @@ impl World {
         let s = self.shape(id);
         // SAFETY: validated id.
         unsafe { sys::b3DestroyShape(s, update_body_mass) }
+        // Release the mesh / height field if this was its last shape.
+        self.prune_resources();
     }
 
     #[track_caller]
