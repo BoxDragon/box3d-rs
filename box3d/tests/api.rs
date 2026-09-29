@@ -329,3 +329,51 @@ fn defs_are_values_and_worlds_configurable() {
     assert_eq!(std::mem::size_of::<ShapeId>(), 8);
     assert_eq!(std::mem::size_of::<JointId>(), 8);
 }
+
+#[test]
+fn shape_geometry_getters_and_hull_edges() {
+    let mut w = world();
+    let b = w.create_body(&BodyDef::dynamic(Pos::new(0.0, 5.0, 0.0)));
+    let s = w.create_sphere_shape(b, &ShapeDef::default(), Vec3::new(0.0, 1.0, 0.0), 0.5);
+    let c = w.create_capsule_shape(b, &ShapeDef::default(), Vec3::new(-1.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 0.25);
+    let h = w.create_box_shape(b, &ShapeDef::default(), Vec3::new(1.0, 2.0, 3.0));
+
+    assert_eq!(w.shape_sphere(s), Some((Vec3::new(0.0, 1.0, 0.0), 0.5)));
+    assert_eq!(w.shape_sphere(c), None);
+    assert_eq!(w.shape_capsule(c), Some((Vec3::new(-1.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 0.25)));
+
+    // A box has 12 edges, each of length 2, 4 or 6.
+    let mut lengths = Vec::new();
+    assert!(w.shape_hull_edges(h, |a, b| lengths.push((b - a).length())));
+    assert_eq!(lengths.len(), 12);
+    for want in [2.0, 4.0, 6.0] {
+        assert_eq!(lengths.iter().filter(|l| (**l - want).abs() < 1e-4).count(), 4, "{lengths:?}");
+    }
+    assert!(!w.shape_hull_edges(s, |_, _| panic!("not a hull")));
+
+    let mut n = 0;
+    Hull::cuboid(Vec3::ONE).for_each_edge(|_, _| n += 1);
+    assert_eq!(n, 12);
+}
+
+#[test]
+fn filter_joint_disables_collision_between_its_bodies() {
+    let drop_onto = |filtered: bool| {
+        let mut w = world();
+        ground(&mut w);
+        let low = w.create_body(&BodyDef::fixed(Pos::new(0.0, 1.0, 0.0)));
+        w.create_box_shape(low, &ShapeDef::default(), Vec3::new(1.0, 0.1, 1.0));
+        let top = w.create_body(&BodyDef::dynamic(Pos::new(0.0, 2.0, 0.0)));
+        w.create_box_shape(top, &ShapeDef::default(), Vec3::splat(0.25));
+        if filtered {
+            w.create_filter_joint(&FilterJointDef::new(low, top));
+        }
+        for _ in 0..120 {
+            w.step(DT, SUBSTEPS);
+        }
+        w.body_position(top).y
+    };
+    // Unfiltered it rests on the plate (y ~ 1.35), filtered it falls through to the ground.
+    assert!(drop_onto(false) > 1.2);
+    assert!(drop_onto(true) < 0.5);
+}

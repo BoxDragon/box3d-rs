@@ -109,6 +109,43 @@ impl Hull {
     pub fn inner_radius(&self) -> f32 {
         self.data().innerRadius
     }
+
+    /// Call `f(a, b)` once per edge with hull-local endpoints (wireframes).
+    pub fn for_each_edge(&self, f: impl FnMut(Vec3, Vec3)) {
+        for_each_hull_edge(self.data(), f);
+    }
+}
+
+/// Each edge of `data` once: a half-edge pair is reported from the lower index.
+pub(crate) fn for_each_hull_edge(data: &sys::b3HullData, mut f: impl FnMut(Vec3, Vec3)) {
+    if data.pointOffset == 0 || data.edgeOffset == 0 || data.vertexCount <= 0 || data.edgeCount <= 0 {
+        return;
+    }
+    let base = data as *const sys::b3HullData as *const u8;
+    // SAFETY: like b3GetHullPoints/b3GetHullEdges: the offsets are byte offsets
+    // from the struct into its own allocation, with one point per vertex.
+    let (points, edges) = unsafe {
+        (
+            core::slice::from_raw_parts(
+                base.add(data.pointOffset as usize) as *const sys::b3Vec3,
+                data.vertexCount as usize,
+            ),
+            core::slice::from_raw_parts(
+                base.add(data.edgeOffset as usize) as *const sys::b3HullHalfEdge,
+                data.edgeCount as usize,
+            ),
+        )
+    };
+    for (i, e) in edges.iter().enumerate() {
+        let twin = e.twin as usize;
+        if twin < i || twin >= edges.len() {
+            continue;
+        }
+        let (a, b) = (e.origin as usize, edges[twin].origin as usize);
+        if a < points.len() && b < points.len() {
+            f(from_v3(points[a]), from_v3(points[b]));
+        }
+    }
 }
 
 impl Clone for Hull {

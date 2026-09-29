@@ -632,6 +632,27 @@ impl WeldJointId {
 }
 
 // ---------------------------------------------------------------------------
+// Filter joint
+
+joint_def!(
+    /// Filter joint definition: no constraint, only disables collision between
+    /// the two bodies (e.g. a carried crate and its carrier). Leave
+    /// `collide_connected` off.
+    FilterJointDef,
+    sys::b3FilterJointDef,
+    b3DefaultFilterJointDef
+);
+
+impl World {
+    #[track_caller]
+    pub fn create_filter_joint(&mut self, def: &FilterJointDef) -> JointId {
+        let d = def.validated(self);
+        // SAFETY: bodies validated and owned by this world.
+        JointId(unsafe { sys::b3CreateFilterJoint(self.id, &d) })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Wheel joint
 
 typed_joint!(

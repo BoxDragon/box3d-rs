@@ -1,6 +1,6 @@
 use crate::hull::Hull;
 use crate::id::{BodyId, ShapeId};
-use crate::math::{v3, xf};
+use crate::math::{from_v3, v3, xf};
 use crate::{Error, Transform, Vec3, World, sys};
 use core::marker::PhantomData;
 
@@ -324,6 +324,52 @@ impl World {
     pub fn shape_body(&self, id: ShapeId) -> BodyId {
         // SAFETY: validated id.
         BodyId(unsafe { sys::b3Shape_GetBody(self.shape(id)) })
+    }
+
+    #[track_caller]
+    pub fn shape_is_sensor(&self, id: ShapeId) -> bool {
+        // SAFETY: validated id.
+        unsafe { sys::b3Shape_IsSensor(self.shape(id)) }
+    }
+
+    /// `(body-local center, radius)` of a sphere shape; `None` for other types.
+    #[track_caller]
+    pub fn shape_sphere(&self, id: ShapeId) -> Option<(Vec3, f32)> {
+        let s = self.shape(id);
+        (self.shape_type(id) == ShapeType::Sphere).then(|| {
+            // SAFETY: validated sphere shape.
+            let g = unsafe { sys::b3Shape_GetSphere(s) };
+            (from_v3(g.center), g.radius)
+        })
+    }
+
+    /// `(center1, center2, radius)` of a capsule shape, body-local; `None` for
+    /// other types.
+    #[track_caller]
+    pub fn shape_capsule(&self, id: ShapeId) -> Option<(Vec3, Vec3, f32)> {
+        let s = self.shape(id);
+        (self.shape_type(id) == ShapeType::Capsule).then(|| {
+            // SAFETY: validated capsule shape.
+            let g = unsafe { sys::b3Shape_GetCapsule(s) };
+            (from_v3(g.center1), from_v3(g.center2), g.radius)
+        })
+    }
+
+    /// Call `f(a, b)` once per edge of a hull shape, body-local. Returns
+    /// `false` (and calls nothing) for other shape types.
+    #[track_caller]
+    pub fn shape_hull_edges(&self, id: ShapeId, f: impl FnMut(Vec3, Vec3)) -> bool {
+        let s = self.shape(id);
+        if self.shape_type(id) != ShapeType::Hull {
+            return false;
+        }
+        // SAFETY: validated hull shape; the hull lives in the world's hull
+        // database at least as long as the shape, and `&self` keeps the shape.
+        let data = unsafe { sys::b3Shape_GetHull(s).as_ref() };
+        if let Some(data) = data {
+            crate::hull::for_each_hull_edge(data, f);
+        }
+        true
     }
 
     #[track_caller]

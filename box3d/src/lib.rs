@@ -102,7 +102,7 @@ pub use height_field::{HEIGHT_FIELD_HOLE, HeightField, HeightFieldDef};
 pub use hull::Hull;
 pub use id::{BodyId, JointId, ShapeId, WorldId};
 pub use joint::{
-    DistanceJointDef, DistanceJointId, JointType, MotorJointDef, MotorJointId, PrismaticJointDef, PrismaticJointId,
+    DistanceJointDef, DistanceJointId, FilterJointDef, JointType, MotorJointDef, MotorJointId, PrismaticJointDef, PrismaticJointId,
     RevoluteJointDef, RevoluteJointId, SphericalJointDef, SphericalJointId, WeldJointDef, WeldJointId, WheelJointDef,
     WheelJointId,
 };
