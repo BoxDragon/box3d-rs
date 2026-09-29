@@ -5047,6 +5047,45 @@ const _: () = {
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct b3WorldDelta {
+    _unused: [u8; 0],
+}
+#[doc = " Capture statistics"]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct b3WorldDeltaStats {
+    #[doc = " Elements compared by the last capture"]
+    pub comparedCount: ::core::ffi::c_int,
+    #[doc = " Elements that changed in the last capture"]
+    pub changedCount: ::core::ffi::c_int,
+    #[doc = " Undo bytes stored by the last capture"]
+    pub changedBytes: ::core::ffi::c_int,
+    #[doc = " Bytes held in all undo logs"]
+    pub logBytes: i64,
+    #[doc = " Bytes held by the mirror"]
+    pub mirrorBytes: i64,
+    #[doc = " Changes found by verification that the candidate set missed (verification only)"]
+    pub missCount: ::core::ffi::c_int,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of b3WorldDeltaStats"][::core::mem::size_of::<b3WorldDeltaStats>() - 40usize];
+    ["Alignment of b3WorldDeltaStats"][::core::mem::align_of::<b3WorldDeltaStats>() - 8usize];
+    ["Offset of field: b3WorldDeltaStats::comparedCount"]
+        [::core::mem::offset_of!(b3WorldDeltaStats, comparedCount) - 0usize];
+    ["Offset of field: b3WorldDeltaStats::changedCount"]
+        [::core::mem::offset_of!(b3WorldDeltaStats, changedCount) - 4usize];
+    ["Offset of field: b3WorldDeltaStats::changedBytes"]
+        [::core::mem::offset_of!(b3WorldDeltaStats, changedBytes) - 8usize];
+    ["Offset of field: b3WorldDeltaStats::logBytes"]
+        [::core::mem::offset_of!(b3WorldDeltaStats, logBytes) - 16usize];
+    ["Offset of field: b3WorldDeltaStats::mirrorBytes"]
+        [::core::mem::offset_of!(b3WorldDeltaStats, mirrorBytes) - 24usize];
+    ["Offset of field: b3WorldDeltaStats::missCount"]
+        [::core::mem::offset_of!(b3WorldDeltaStats, missCount) - 32usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct b3Recording {
     _unused: [u8; 0],
 }
@@ -5960,6 +5999,25 @@ unsafe extern "C" {
     pub fn b3World_DumpShapeBounds(worldId: b3WorldId, type_: b3BodyType);
     #[doc = " This is for internal testing"]
     pub fn b3World_EnableSpeculative(worldId: b3WorldId, flag: bool);
+    #[doc = " Create a tracker and capture the current world state as tick 0. The world must not already have\n a tracker. The tracker must be destroyed before the world, or it becomes detached when the world\n is destroyed and then only b3DestroyWorldDelta is valid. Host pointers (user data, callbacks and\n their contexts) are restored verbatim, so restores are only valid in the capturing process.\n @return NULL if the world is locked or already has a tracker\n @param maxTicks the rollback window: restorable ticks are [newest - maxTicks, newest]"]
+    pub fn b3CreateWorldDelta(
+        worldId: b3WorldId,
+        maxTicks: ::core::ffi::c_int,
+    ) -> *mut b3WorldDelta;
+    #[doc = " Destroy a tracker"]
+    pub fn b3DestroyWorldDelta(delta: *mut b3WorldDelta);
+    #[doc = " Capture the current world state as the next tick. Call once after each b3World_Step. API changes\n made between captures belong to the next capture.\n @return the captured tick, or B3_NULL_INDEX if the world is locked or detached"]
+    pub fn b3WorldDelta_Capture(delta: *mut b3WorldDelta) -> ::core::ffi::c_int;
+    #[doc = " Restore the world to a previously captured tick. Captured ticks newer than the restored tick are\n discarded and the next capture continues from tick + 1.\n Refused while the world is recording, since a recording cannot express the rewind.\n @return false if the tick is outside the window, the world is locked or recording"]
+    pub fn b3WorldDelta_Restore(delta: *mut b3WorldDelta, tick: ::core::ffi::c_int) -> bool;
+    #[doc = " Newest captured tick"]
+    pub fn b3WorldDelta_GetNewestTick(delta: *const b3WorldDelta) -> ::core::ffi::c_int;
+    #[doc = " Oldest restorable tick"]
+    pub fn b3WorldDelta_GetOldestTick(delta: *const b3WorldDelta) -> ::core::ffi::c_int;
+    #[doc = " Debug: also scan every element on capture and count changes the candidate set missed. Missed\n changes are still recorded so restores stay correct. This costs as much as a full snapshot."]
+    pub fn b3WorldDelta_EnableVerify(delta: *mut b3WorldDelta, flag: bool);
+    #[doc = " Statistics of the last capture"]
+    pub fn b3WorldDelta_GetStats(delta: *const b3WorldDelta) -> b3WorldDeltaStats;
     #[doc = " Create a recording buffer with an optional initial byte capacity.\n Pass 0 to use the default (64 KiB). The buffer grows on demand.\n @return a new recording, owned by the caller"]
     pub fn b3CreateRecording(byteCapacity: ::core::ffi::c_int) -> *mut b3Recording;
     #[doc = " Destroy a recording and free its buffer.\n @param recording may be NULL"]
