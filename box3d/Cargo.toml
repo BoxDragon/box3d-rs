@@ -1,0 +1,21 @@
+[package]
+name = "box3d"
+description = "Thin safe wrapper over Box3D (Erin Catto's 3D physics engine)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = ["glam"]
+# glam is always used by the safe API; this feature forwards glam From/Into
+# impls on the raw box3d-sys types (b3Vec3, b3Quat, b3Pos).
+glam = ["box3d-sys/glam"]
+double-precision = ["box3d-sys/double-precision"]
+bindgen = ["box3d-sys/bindgen"]
+validate = ["box3d-sys/validate"]
+disable-simd = ["box3d-sys/disable-simd"]
+
+[dependencies]
+box3d-sys = { path = "../box3d-sys", version = "0.1.0", default-features = false }
+glam.workspace = true

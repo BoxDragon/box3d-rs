@@ -1,0 +1,42 @@
+[package]
+name = "box3d-sys"
+description = "Raw FFI bindings to Box3D (Erin Catto's 3D physics engine), vendored and built with cc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+links = "box3d"
+build = "build.rs"
+include = [
+    "build.rs",
+    "wrapper.h",
+    "src/**/*.rs",
+    "box3d/LICENSE",
+    "box3d/include/**/*.h",
+    "box3d/src/**/*.c",
+    "box3d/src/**/*.h",
+    "box3d/src/**/*.inl",
+]
+
+[features]
+default = ["glam"]
+# From/Into between b3Vec3/b3Quat/b3Pos and glam types.
+glam = ["dep:glam"]
+# Regenerate bindings with bindgen at build time (needs libclang) instead of
+# using the committed src/bindings*.rs.
+bindgen = ["dep:bindgen"]
+# Large-world mode: b3Pos becomes f64 (BOX3D_DOUBLE_PRECISION). Changes the ABI.
+double-precision = []
+# Box3D heavy internal validation (BOX3D_VALIDATE). Only effective in debug builds.
+validate = []
+# Build Box3D's scalar fallback instead of SSE2/NEON.
+disable-simd = []
+# Keep Box3D asserts on in release builds (B3_ENABLE_ASSERT).
+enable-assert = []
+
+[dependencies]
+glam = { workspace = true, optional = true }
+
+[build-dependencies]
+cc = "1.2"
+bindgen = { version = "0.72", optional = true }

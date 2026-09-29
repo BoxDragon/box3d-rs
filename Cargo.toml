@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = ["box3d-sys", "box3d"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+glam = "0.30"
+
+# Box3D is slow unoptimized; keep the C (and its bindings) optimized in dev
+# and test builds of this workspace. Downstream crates should add the same
+# override to their own workspace manifest.
+[profile.dev.package.box3d-sys]
+opt-level = 3
