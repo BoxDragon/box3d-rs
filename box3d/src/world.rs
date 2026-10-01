@@ -217,8 +217,17 @@ pub(crate) enum Resource {
     HeightField(crate::HeightField),
 }
 
+/// A [`Resource`] and the shape keeping it. `born` is the delta tracker's
+/// newest captured tick when the shape was created (-1 without a tracker):
+/// the shape exists in captured ticks after `born`.
+pub(crate) struct Retained {
+    pub(crate) shape: ShapeId,
+    pub(crate) resource: Resource,
+    pub(crate) born: i32,
+}
+
 #[derive(Clone, Copy, Debug)]
-enum Destroy {
+pub(crate) enum Destroy {
     Body(BodyId),
     Shape(ShapeId, bool),
     Joint(JointId, bool),
@@ -234,10 +243,12 @@ enum Destroy {
 pub struct World {
     pub(crate) id: sys::b3WorldId,
     callbacks: Box<Callbacks>,
-    destroy_queue: Vec<Destroy>,
+    pub(crate) destroy_queue: Vec<Destroy>,
     /// One entry per mesh / height-field shape (see [`Resource`]). Pruned when
     /// shapes or bodies are destroyed, never during `step`.
-    resources: Vec<(ShapeId, Resource)>,
+    pub(crate) resources: Vec<Retained>,
+    /// Rollback tracker, see [`World::enable_delta`].
+    pub(crate) delta: Option<crate::delta::WorldDelta>,
     _not_sync: PhantomData<Cell<()>>,
 }
 
@@ -258,7 +269,7 @@ impl World {
         if id.index1 == 0 {
             return Err(Error::TooManyWorlds);
         }
-        Ok(World { id, callbacks, destroy_queue, resources: Vec::new(), _not_sync: PhantomData })
+        Ok(World { id, callbacks, destroy_queue, resources: Vec::new(), delta: None, _not_sync: PhantomData })
     }
 
     pub fn id(&self) -> WorldId {
@@ -356,27 +367,34 @@ impl World {
 
     /// Keep `resource` alive for as long as `shape` exists.
     pub(crate) fn retain_resource(&mut self, shape: ShapeId, resource: Resource) {
-        self.resources.push((shape, resource));
+        let born = self.delta.as_ref().map_or(-1, |d| d.tick);
+        self.resources.push(Retained { shape, resource, born });
     }
 
     /// Release meshes / height fields whose shape no longer exists. Must run
-    /// only *after* Box3D destroyed the shapes. Never allocates.
+    /// only *after* Box3D destroyed the shapes. Never allocates without a
+    /// delta tracker; with one, dead shapes' geometry moves to the tracker
+    /// until no restorable tick can revive them.
     pub(crate) fn prune_resources(&mut self) {
         if self.resources.is_empty() {
             return;
         }
         let world0 = self.index0();
         // SAFETY: b3Shape_IsValid accepts any id; see is_body_valid.
-        self.resources.retain(|(s, _)| s.world0() == world0 && unsafe { sys::b3Shape_IsValid(s.0) });
+        let alive = |s: ShapeId| s.world0() == world0 && unsafe { sys::b3Shape_IsValid(s.0) };
+        match self.delta.as_mut() {
+            None => self.resources.retain(|r| alive(r.shape)),
+            Some(delta) => delta.bury_dead(&mut self.resources, alive),
+        }
     }
 
     /// True if `body` carries a height-field shape created through this API.
     pub(crate) fn body_has_height_field(&self, body: BodyId) -> bool {
-        self.resources.iter().any(|(s, r)| {
-            matches!(r, Resource::HeightField(_))
-                && self.is_shape_valid(*s)
+        self.resources.iter().any(|r| {
+            matches!(r.resource, Resource::HeightField(_))
+                && self.is_shape_valid(r.shape)
                 // SAFETY: validated shape id.
-                && BodyId(unsafe { sys::b3Shape_GetBody(s.0) }) == body
+                && BodyId(unsafe { sys::b3Shape_GetBody(r.shape.0) }) == body
         })
     }
 
@@ -472,6 +490,28 @@ impl World {
         self.callbacks.pre_solve = None;
     }
 
+    /// Point Box3D at the callbacks set now (a delta restore brings back
+    /// the registration of the restored tick).
+    pub(crate) fn reregister_callbacks(&mut self) {
+        let ctx = &*self.callbacks as *const Callbacks as *mut c_void;
+        let filter = self.callbacks.custom_filter.is_some();
+        let pre_solve = self.callbacks.pre_solve.is_some();
+        // SAFETY: valid world; ctx outlives the registration (boxed, owned
+        // by self), and a trampoline is registered only with its closure set.
+        unsafe {
+            sys::b3World_SetCustomFilterCallback(
+                self.id,
+                if filter { Some(custom_filter_tramp) } else { None },
+                if filter { ctx } else { core::ptr::null_mut() },
+            );
+            sys::b3World_SetPreSolveCallback(
+                self.id,
+                if pre_solve { Some(pre_solve_tramp) } else { None },
+                if pre_solve { ctx } else { core::ptr::null_mut() },
+            );
+        }
+    }
+
     // ---- id validation -------------------------------------------------
 
     /// True if `id` refers to a live body in this world.
@@ -517,6 +557,8 @@ impl World {
 
 impl Drop for World {
     fn drop(&mut self) {
+        // The tracker goes first, while its world is still alive.
+        self.delta = None;
         let _guard = lock_world_table();
         // SAFETY: we own this world id; destroyed exactly once. Destroying the
         // world frees all bodies/shapes/joints; callbacks are dropped after.
@@ -541,8 +583,8 @@ impl World {
     #[track_caller]
     pub fn shape_mesh(&self, id: ShapeId) -> Option<crate::Mesh> {
         self.shape(id);
-        self.resources.iter().find_map(|(s, r)| match r {
-            Resource::Mesh(m) if *s == id => Some(m.clone()),
+        self.resources.iter().find_map(|r| match &r.resource {
+            Resource::Mesh(m) if r.shape == id => Some(m.clone()),
             _ => None,
         })
     }
@@ -556,8 +598,8 @@ impl World {
     #[track_caller]
     pub fn shape_height_field(&self, id: ShapeId) -> Option<crate::HeightField> {
         self.shape(id);
-        self.resources.iter().find_map(|(s, r)| match r {
-            Resource::HeightField(h) if *s == id => Some(h.clone()),
+        self.resources.iter().find_map(|r| match &r.resource {
+            Resource::HeightField(h) if r.shape == id => Some(h.clone()),
             _ => None,
         })
     }

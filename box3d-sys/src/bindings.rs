@@ -5908,6 +5908,8 @@ unsafe extern "C" {
     pub fn b3World_IsWarmStartingEnabled(worldId: b3WorldId) -> bool;
     #[doc = " Get the number of awake bodies"]
     pub fn b3World_GetAwakeBodyCount(worldId: b3WorldId) -> ::core::ffi::c_int;
+    #[doc = " Hash of every body's transform and velocity: the hash recordings store per step. Equal on two\n worlds exactly when those are bit-identical, so it detects divergence between runs or peers.\n @return 0 if the world is invalid or locked"]
+    pub fn b3World_GetStateHash(worldId: b3WorldId) -> u64;
     #[doc = " Get the current world performance profile"]
     pub fn b3World_GetProfile(worldId: b3WorldId) -> b3Profile;
     #[doc = " Get world counters and sizes"]

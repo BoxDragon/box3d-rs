@@ -81,6 +81,7 @@ pub use glam;
 pub use glam::{Mat3, Quat, Vec3};
 
 mod body;
+mod delta;
 mod events;
 mod height_field;
 mod hull;
@@ -94,6 +95,7 @@ mod shape;
 mod world;
 
 pub use body::{BodyDef, BodyType, MassData};
+pub use delta::{DeltaStats, WorldDelta};
 pub use events::{
     BodyEvents, BodyMoveEvent, ContactBeginEvent, ContactEndEvent, ContactEvents, ContactHitEvent, JointEvent,
     JointEvents, SensorBeginEvent, SensorEndEvent, SensorEvents,
@@ -130,6 +132,9 @@ pub enum Error {
     InvalidArgument(&'static str),
     /// [`set_allocator`] was called while Box3D still held memory.
     AllocatorBusy,
+    /// [`World::restore_delta`]: the tick is outside the tracker's window, or
+    /// the world is recording.
+    RestoreRefused,
 }
 
 impl core::fmt::Display for Error {
@@ -140,6 +145,7 @@ impl core::fmt::Display for Error {
             Error::MeshCreationFailed => write!(f, "Box3D mesh creation failed"),
             Error::InvalidArgument(what) => write!(f, "invalid argument: {what}"),
             Error::AllocatorBusy => write!(f, "Box3D allocator can only be replaced while nothing is allocated"),
+            Error::RestoreRefused => write!(f, "world delta restore refused (tick outside the window, or recording)"),
         }
     }
 }
