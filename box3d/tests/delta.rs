@@ -61,7 +61,7 @@ fn restore_and_restep_is_bit_identical() {
             w.apply_linear_impulse_to_center(bodies[3], Vec3::new(400.0, 0.0, 0.0), true);
         }
         w.step(DT, SUBSTEPS);
-        assert_eq!(w.capture_delta(), Some(t));
+        assert_eq!(w.capture_delta(), Ok(t));
         hashes.push(w.state_hash());
         poses.push(snapshot(&w, &bodies));
     }
@@ -80,7 +80,7 @@ fn restore_and_restep_is_bit_identical() {
                 w.apply_linear_impulse_to_center(bodies[3], Vec3::new(400.0, 0.0, 0.0), true);
             }
             w.step(DT, SUBSTEPS);
-            assert_eq!(w.capture_delta(), Some(tick));
+            assert_eq!(w.capture_delta(), Ok(tick));
             assert_eq!(w.state_hash(), hashes[tick as usize], "hash at re-stepped {tick}");
             assert_eq!(snapshot(&w, &bodies), poses[tick as usize], "poses at re-stepped {tick}");
         }
@@ -91,13 +91,13 @@ fn restore_and_restep_is_bit_identical() {
 fn restore_window_and_refusals() {
     let (mut w, _) = pile();
     assert_eq!(w.restore_delta(0), Err(Error::InvalidArgument("world has no delta tracker")));
-    assert!(w.capture_delta().is_none());
+    assert!(w.capture_delta().is_err());
     assert!(w.enable_delta(0).is_err());
     w.enable_delta(4).unwrap();
     assert!(w.enable_delta(4).is_err(), "one tracker per world");
     for _ in 0..10 {
         w.step(DT, SUBSTEPS);
-        w.capture_delta();
+        w.capture_delta().unwrap();
     }
     assert_eq!(w.restore_delta(5), Err(Error::RestoreRefused), "older than the window");
     assert_eq!(w.restore_delta(11), Err(Error::RestoreRefused), "not captured yet");
@@ -110,7 +110,7 @@ fn restore_window_and_refusals() {
     assert!(w.delta().is_none());
     w.enable_delta(4).unwrap();
     w.step(DT, SUBSTEPS);
-    assert_eq!(w.capture_delta(), Some(1));
+    assert_eq!(w.capture_delta(), Ok(1));
     // Dropping a tracked world is fine.
     drop(w);
 }
@@ -120,7 +120,7 @@ fn ids_follow_the_restored_state() {
     let (mut w, bodies) = pile();
     w.enable_delta(8).unwrap();
     w.step(DT, SUBSTEPS);
-    w.capture_delta();
+    w.capture_delta().unwrap();
 
     let doomed = bodies[5];
     w.destroy_body(doomed);
@@ -129,7 +129,7 @@ fn ids_follow_the_restored_state() {
     // Queued requests are undone by the restore too.
     w.queue_destroy_body(bodies[6]);
     w.step(DT, SUBSTEPS);
-    w.capture_delta();
+    w.capture_delta().unwrap();
     assert!(!w.is_body_valid(doomed) && w.is_body_valid(born) && !w.is_body_valid(bodies[6]));
 
     w.restore_delta(1).unwrap();
@@ -154,7 +154,7 @@ fn restored_mesh_shapes_keep_their_geometry() {
     let floor = w.create_body(&BodyDef::fixed(Pos::new(-4.0, 0.0, -4.0)));
     let floor_shape = w.create_mesh_shape(floor, &ShapeDef::default(), &floor_mesh, Vec3::ONE);
     w.step(DT, SUBSTEPS);
-    w.capture_delta();
+    w.capture_delta().unwrap();
     assert_eq!(floor_mesh.strong_count(), 2, "handle + world");
 
     // Tick 2: the floor is destroyed, another mesh shape is created.
@@ -164,7 +164,7 @@ fn restored_mesh_shapes_keep_their_geometry() {
     let late = w.create_body(&BodyDef::fixed(Pos::new(20.0, 0.0, 0.0)));
     w.create_mesh_shape(late, &ShapeDef::default(), &late_mesh, Vec3::ONE);
     w.step(DT, SUBSTEPS);
-    w.capture_delta();
+    w.capture_delta().unwrap();
 
     // Back to tick 1: the floor shape (and its mesh) is live again; the late
     // shape is gone and its mesh released.
@@ -175,7 +175,7 @@ fn restored_mesh_shapes_keep_their_geometry() {
     assert_eq!(w.shape_mesh(floor_shape).unwrap().strong_count(), 2, "world + the clone");
     for _ in 0..120 {
         w.step(DT, SUBSTEPS);
-        w.capture_delta();
+        w.capture_delta().unwrap();
     }
     assert!((w.body_position(ball).y as f32 - 0.3).abs() < 0.03, "the ball rests on the restored mesh");
 
@@ -184,7 +184,7 @@ fn restored_mesh_shapes_keep_their_geometry() {
     w.destroy_body(floor);
     for _ in 0..10 {
         w.step(DT, SUBSTEPS);
-        w.capture_delta();
+        w.capture_delta().unwrap();
     }
     assert_eq!(probe.strong_count(), 1, "released once no restorable tick has the shape");
 }
@@ -198,7 +198,7 @@ fn verify_finds_no_misses_and_hash_compares_worlds() {
     a.set_delta_verify(true);
     for t in 0..40 {
         a.step(DT, SUBSTEPS);
-        a.capture_delta();
+        a.capture_delta().unwrap();
         assert_eq!(a.delta().unwrap().stats().misses, 0, "candidate set missed a change at {t}");
         b.step(DT, SUBSTEPS);
         assert_eq!(a.state_hash(), b.state_hash(), "tracking does not change the simulation");
@@ -207,4 +207,23 @@ fn verify_finds_no_misses_and_hash_compares_worlds() {
     b.step(DT, SUBSTEPS);
     a.step(DT, SUBSTEPS);
     assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn state_hash_covers_more_than_poses_and_velocities() {
+    let (mut a, bodies) = pile();
+    let (b, _) = pile();
+    // Same pose and velocity, different gravity scale.
+    a.set_body_gravity_scale(bodies[3], 0.5);
+    assert_ne!(a.state_hash(), b.state_hash(), "gravity scale");
+    a.set_body_gravity_scale(bodies[3], 1.0);
+    assert_eq!(a.state_hash(), b.state_hash());
+    // Same pose, zero velocity, asleep instead of awake.
+    let (mut a, bodies) = pile();
+    let (mut b, b_bodies) = pile();
+    a.set_body_linear_velocity(bodies[0], Vec3::ZERO);
+    b.set_body_linear_velocity(b_bodies[0], Vec3::ZERO);
+    assert_eq!(a.state_hash(), b.state_hash());
+    a.set_body_awake(bodies[0], false);
+    assert_ne!(a.state_hash(), b.state_hash(), "sleep state");
 }

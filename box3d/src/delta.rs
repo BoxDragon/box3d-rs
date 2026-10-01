@@ -145,16 +145,25 @@ impl World {
 
     /// Capture the current state as the next tick; call once after each
     /// [`World::step`]. API changes since the last capture belong to this
-    /// one. `None` without a tracker.
-    pub fn capture_delta(&mut self) -> Option<i32> {
-        let delta = self.delta.as_mut()?;
+    /// one. Returns the captured tick.
+    ///
+    /// Fails without a tracker, or when Box3D refuses (world locked or the
+    /// tracker detached; neither happens through this API). After a refusal
+    /// the state since the newest tick is not captured: disable tracking
+    /// rather than keep stepping.
+    pub fn capture_delta(&mut self) -> Result<i32, Error> {
+        let Some(delta) = self.delta.as_mut() else {
+            return Err(Error::InvalidArgument("world has no delta tracker"));
+        };
         // SAFETY: live tracker attached to this live, unlocked world.
         let tick = unsafe { sys::b3WorldDelta_Capture(delta.raw.as_ptr()) };
-        debug_assert!(tick >= 0, "b3WorldDelta_Capture refused");
+        if tick < 0 {
+            return Err(Error::CaptureRefused);
+        }
         delta.tick = tick;
         let oldest = delta.oldest_tick();
         delta.graveyard.retain(|b| b.died >= oldest);
-        Some(tick)
+        Ok(tick)
     }
 
     /// Restore the world to captured `tick`. Captured ticks after it are
@@ -208,10 +217,13 @@ impl World {
         }
     }
 
-    /// Hash of every body's transform and velocity (`b3World_GetStateHash`,
-    /// the per-step hash Box3D recordings store). Two worlds hash equal
-    /// exactly when those are bit-identical: compare it across runs or peers
-    /// to detect divergence.
+    /// Divergence hash (`b3World_GetStateHash`): compare it across runs or
+    /// peers. Covers, per live body: slot, generation, type, flags,
+    /// awake/sleeping/disabled, sleep time, mass properties, damping, gravity
+    /// scale, pending force and torque, transform and velocity; per live
+    /// joint: slot, generation, type, set, bodies and warm-start impulses.
+    /// Not covered: shapes, contacts and their warm-start impulses, islands.
+    /// Equal states hash equal; a different hash means divergence.
     pub fn state_hash(&self) -> u64 {
         // SAFETY: valid world, never locked outside `step`.
         unsafe { sys::b3World_GetStateHash(self.id) }

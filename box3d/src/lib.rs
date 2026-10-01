@@ -135,6 +135,8 @@ pub enum Error {
     /// [`World::restore_delta`]: the tick is outside the tracker's window, or
     /// the world is recording.
     RestoreRefused,
+    /// [`World::capture_delta`]: the tracker refused (world locked or detached).
+    CaptureRefused,
 }
 
 impl core::fmt::Display for Error {
@@ -146,6 +148,7 @@ impl core::fmt::Display for Error {
             Error::InvalidArgument(what) => write!(f, "invalid argument: {what}"),
             Error::AllocatorBusy => write!(f, "Box3D allocator can only be replaced while nothing is allocated"),
             Error::RestoreRefused => write!(f, "world delta restore refused (tick outside the window, or recording)"),
+            Error::CaptureRefused => write!(f, "world delta capture refused (world locked or detached)"),
         }
     }
 }
