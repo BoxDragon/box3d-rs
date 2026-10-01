@@ -2,6 +2,10 @@ use crate::id::{BodyId, JointId, ShapeId};
 use crate::math::{from_mat3, from_pos, from_quat, from_v3, mat3, pos, quat, v3};
 use crate::{Mat3, Pos, Quat, Vec3, World, sys};
 
+/// Seconds every body of an island must rest below its sleep threshold
+/// before the island falls asleep (`B3_TIME_TO_SLEEP`).
+pub const TIME_TO_SLEEP: f32 = sys::B3_TIME_TO_SLEEP as f32;
+
 /// Body simulation type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum BodyType {
@@ -399,6 +403,28 @@ impl World {
         let b = self.body(id);
         // SAFETY: validated id.
         unsafe { sys::b3Body_EnableSleep(b, enabled) }
+    }
+
+    /// Seconds the body has rested below its sleep threshold. Its island
+    /// falls asleep at the end of a step in which every body in it has
+    /// rested [`TIME_TO_SLEEP`].
+    #[track_caller]
+    pub fn body_sleep_time(&self, id: BodyId) -> f32 {
+        // SAFETY: validated id.
+        unsafe { sys::b3Body_GetSleepTime(self.body(id)) }
+    }
+
+    /// Set the body's sleep time, e.g. copied from another world so its
+    /// island falls asleep on the same step there. A sleeping body ignores a
+    /// time of at least [`TIME_TO_SLEEP`]; a smaller one wakes its island
+    /// first (waking resets the island's sleep times to zero). Static and
+    /// disabled bodies ignore it.
+    #[track_caller]
+    pub fn set_body_sleep_time(&mut self, id: BodyId, seconds: f32) {
+        assert!(seconds.is_finite() && seconds >= 0.0, "sleep time {seconds} must be finite and non-negative");
+        let b = self.body(id);
+        // SAFETY: validated id and time.
+        unsafe { sys::b3Body_SetSleepTime(b, seconds) }
     }
 
     #[track_caller]

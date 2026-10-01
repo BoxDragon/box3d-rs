@@ -6165,6 +6165,10 @@ unsafe extern "C" {
     pub fn b3Body_SetSleepThreshold(bodyId: b3BodyId, sleepThreshold: f32);
     #[doc = " Get the sleep threshold, usually in meters per second."]
     pub fn b3Body_GetSleepThreshold(bodyId: b3BodyId) -> f32;
+    #[doc = " Set how long this body has rested below its sleep threshold, in seconds. Its island falls asleep at the end\n of a step in which every body in the island has rested B3_TIME_TO_SLEEP. Copying sleep times from another\n world makes the island fall asleep on the same step there. A sleeping body ignores a sleep time of at least\n B3_TIME_TO_SLEEP, and a smaller one wakes its island first. Waking resets the sleep times of the island to\n zero. Static and disabled bodies ignore this."]
+    pub fn b3Body_SetSleepTime(bodyId: b3BodyId, sleepTime: f32);
+    #[doc = " Get how long this body has rested below its sleep threshold, in seconds."]
+    pub fn b3Body_GetSleepTime(bodyId: b3BodyId) -> f32;
     #[doc = " Set the continuous collision safety factor. Smaller is safer but can lead to hitching. Recommended range [0.01, 0.5]. Non-dimensional."]
     pub fn b3Body_SetSafetyFactor(bodyId: b3BodyId, safetyFactor: f32);
     #[doc = " Get the continuous collision safety factor. Non-dimensional."]
