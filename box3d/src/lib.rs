@@ -80,6 +80,7 @@ pub use box3d_sys as sys;
 pub use glam;
 pub use glam::{Mat3, Quat, Vec3};
 
+mod blob;
 mod body;
 mod delta;
 mod events;
@@ -137,6 +138,11 @@ pub enum Error {
     RestoreRefused,
     /// [`World::capture_delta`]: the tracker refused (world locked or detached).
     CaptureRefused,
+    /// [`Hull::from_bytes`] / [`Mesh::from_bytes`]: the blob was written by another Box3D
+    /// hull or mesh version (`Hull::VERSION`, `Mesh::VERSION`). Re-cook it.
+    BlobVersionMismatch,
+    /// [`Hull::from_bytes`] / [`Mesh::from_bytes`]: truncated or inconsistent bytes.
+    InvalidBlob(&'static str),
 }
 
 impl core::fmt::Display for Error {
@@ -149,6 +155,8 @@ impl core::fmt::Display for Error {
             Error::AllocatorBusy => write!(f, "Box3D allocator can only be replaced while nothing is allocated"),
             Error::RestoreRefused => write!(f, "world delta restore refused (tick outside the window, or recording)"),
             Error::CaptureRefused => write!(f, "world delta capture refused (world locked or detached)"),
+            Error::BlobVersionMismatch => write!(f, "hull or mesh blob from another Box3D version"),
+            Error::InvalidBlob(what) => write!(f, "invalid hull or mesh blob: {what}"),
         }
     }
 }

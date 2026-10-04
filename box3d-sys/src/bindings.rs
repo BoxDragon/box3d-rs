@@ -5381,6 +5381,13 @@ unsafe extern "C" {
     ) -> *mut b3HullData;
     #[doc = " Destroy a hull."]
     pub fn b3DestroyHull(hull: *mut b3HullData);
+    #[doc = " Copy serialized hull bytes (a hull's `byteCount` bytes, as built) into a new hull. The bytes may be\n unaligned. Only the size is checked: NULL if byteCount is below sizeof( b3HullData ) or differs from\n the blob's byteCount field. The caller validates the copy before use and frees it with b3DestroyHull."]
+    pub fn b3CopyHullBytes(
+        bytes: *const ::core::ffi::c_void,
+        byteCount: ::core::ffi::c_int,
+    ) -> *mut b3HullData;
+    #[doc = " Recompute and store a hull's content hash, as the builders compute it (over its byteCount bytes\n with the hash field zero). Returns it. Checks a loaded hull against the hash it was saved with."]
+    pub fn b3UpdateHullHash(hull: *mut b3HullData) -> u64;
     #[doc = " Make a cube as a hull. Do not call b3DestroyHull on this."]
     pub fn b3MakeCubeHull(halfWidth: f32) -> b3BoxHull;
     #[doc = " Make a box as a hull. Do not call b3DestroyHull on this."]
@@ -5446,6 +5453,13 @@ unsafe extern "C" {
     ) -> *mut b3MeshData;
     #[doc = " Destroy a mesh."]
     pub fn b3DestroyMesh(mesh: *mut b3MeshData);
+    #[doc = " Copy serialized mesh bytes (a mesh's `byteCount` bytes, as built) into a new mesh. The bytes may be\n unaligned. Only the size is checked: NULL if byteCount is below sizeof( b3MeshData ) or differs from\n the blob's byteCount field. The caller validates the copy before use and frees it with b3DestroyMesh."]
+    pub fn b3CopyMeshBytes(
+        bytes: *const ::core::ffi::c_void,
+        byteCount: ::core::ffi::c_int,
+    ) -> *mut b3MeshData;
+    #[doc = " Recompute and store a mesh's content hash, as the builders compute it (over its byteCount bytes\n with the hash field zero). Returns it. Checks a loaded mesh against the hash it was saved with."]
+    pub fn b3UpdateMeshHash(mesh: *mut b3MeshData) -> u64;
     #[doc = " Get the height of the mesh BVH."]
     pub fn b3GetHeight(mesh: *const b3MeshData) -> ::core::ffi::c_int;
     #[doc = " Create a generic height field."]

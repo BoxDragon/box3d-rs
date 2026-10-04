@@ -9,7 +9,7 @@ use crate::id::{BodyId, ShapeId};
 use crate::math::{from_v3, v3};
 use crate::shape::SurfaceMaterial;
 use crate::world::Resource;
-use crate::{Error, ShapeDef, ShapeType, Vec3, World, sys};
+use crate::{Error, ShapeDef, ShapeType, Vec3, World, blob, sys};
 use core::ptr::NonNull;
 use std::sync::Arc;
 
@@ -176,9 +176,10 @@ unsafe impl Sync for MeshData {}
 
 impl Drop for MeshData {
     fn drop(&mut self) {
-        // SAFETY: created by b3CreateMesh (or a b3Create*Mesh helper), freed
-        // exactly once, after every shape using it is gone (the worlds hold
-        // clones of the Arc).
+        // SAFETY: created by b3CreateMesh (or a b3Create*Mesh helper, or
+        // b3CopyMeshBytes with a checked byteCount), freed exactly once,
+        // after every shape using it is gone (the worlds hold clones of the
+        // Arc).
         unsafe { sys::b3DestroyMesh(self.0.as_ptr()) }
     }
 }
@@ -251,6 +252,43 @@ impl Mesh {
         // SAFETY: arguments in range; one material.
         let p = unsafe { sys::b3CreateGridMesh(x_count as i32, z_count as i32, cell_width, 1, identify_edges) };
         Self::from_ptr(p)
+    }
+
+    /// `b3MeshData::version` of meshes this build reads and writes (`B3_MESH_VERSION`).
+    pub const VERSION: u64 = sys::B3_MESH_VERSION as u64;
+
+    /// Load a mesh from bytes written by [`Self::as_bytes`] (possibly unaligned), copied into
+    /// Box3D memory. The result is byte-identical to the mesh that wrote them.
+    ///
+    /// Fails with [`Error::BlobVersionMismatch`] if the blob is from another Box3D mesh
+    /// version, and [`Error::InvalidBlob`] if it is truncated, does not match its content hash
+    /// (corruption), or is inconsistent: every offset, count and index is checked, the BVH must
+    /// be a tree in Box3D's depth-first layout whose leaves cover the triangles in order and
+    /// whose bounds nest (Box3D's `b3IsValidMesh` with validation on), within Box3D's query
+    /// stack depth, and every float must be finite.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Mesh, Error> {
+        blob::check_header::<sys::b3MeshData>(bytes, Self::VERSION, |h| (h.version, h.byteCount))?;
+        // SAFETY: bytes is valid for bytes.len() reads; the size was checked above.
+        let p = unsafe { sys::b3CopyMeshBytes(bytes.as_ptr().cast(), bytes.len() as i32) };
+        // Owned from here, so a rejected copy is freed (with its checked byteCount).
+        let data = MeshData(NonNull::new(p).ok_or(Error::InvalidBlob("copy failed"))?);
+        // SAFETY: a live copy; read before the rehash below writes it.
+        let saved = unsafe { (*p).hash };
+        // SAFETY: our own copy, byteCount checked; rewrites the hash, equal when intact.
+        if unsafe { sys::b3UpdateMeshHash(p) } != saved {
+            return Err(Error::InvalidBlob("hash mismatch"));
+        }
+        // SAFETY: a live, 16-byte aligned copy of bytes.len() bytes.
+        validate_mesh(unsafe { data.0.as_ref() }, bytes.len()).map_err(Error::InvalidBlob)?;
+        Ok(Mesh(Arc::new(data)))
+    }
+
+    /// The mesh's bytes (`byteCount` of them), as Box3D lays them out: self-relative and
+    /// pointer-free, ready for [`Self::from_bytes`].
+    pub fn as_bytes(&self) -> &[u8] {
+        // SAFETY: a mesh owns byteCount contiguous bytes from its header; immutable while any
+        // clone lives.
+        unsafe { core::slice::from_raw_parts(self.as_raw() as *const u8, self.byte_count()) }
     }
 
     fn from_ptr(p: *mut sys::b3MeshData) -> Result<Mesh, Error> {
@@ -346,6 +384,113 @@ impl Mesh {
     pub fn ptr_eq(a: &Mesh, b: &Mesh) -> bool {
         Arc::ptr_eq(&a.0, &b.0)
     }
+}
+
+/// `B3_MESH_STACK_SIZE` (mesh.c, internal): the traversal stack of mesh queries.
+const MESH_STACK_SIZE: usize = 256;
+
+/// `B3_LEAF_NODE` (mesh.c, internal): the 2-bit node tag of a leaf.
+const LEAF_NODE: u32 = 3;
+
+fn contains(b: &sys::b3MeshNode, p: &sys::b3Vec3) -> bool {
+    let (l, u) = (&b.lowerBound, &b.upperBound);
+    l.x <= p.x && l.y <= p.y && l.z <= p.z && p.x <= u.x && p.y <= u.y && p.z <= u.z
+}
+
+fn contains_node(a: &sys::b3MeshNode, b: &sys::b3MeshNode) -> bool {
+    contains(a, &b.lowerBound) && contains(a, &b.upperBound)
+}
+
+/// `b3IsValidMesh` (with `b3IsConsistent`) made safe for untrusted bytes: every array inside
+/// the `len`-byte blob, every index in range, and the BVH a depth-first tree (left child
+/// follows its parent, the right child at `childOffset`, each subtree a contiguous node range)
+/// that Box3D's query stack can traverse, with leaves covering the triangles in order. `data`
+/// heads a `len`-byte, 16-byte aligned allocation.
+fn validate_mesh(data: &sys::b3MeshData, len: usize) -> Result<(), &'static str> {
+    let (nc, vc, tc) = (data.nodeCount, data.vertexCount, data.triangleCount);
+    if vc < 3 || tc < 1 || nc < 1 || nc as i64 > 2 * tc as i64 - 1 {
+        return Err("mesh counts out of range");
+    }
+    if !(1..=256).contains(&data.materialCount) || data.degenerateCount < 0 || data.treeHeight < 0 {
+        return Err("mesh counts out of range");
+    }
+    let (nc, vc, tc) = (nc as usize, vc as usize, tc as usize);
+    let arrays = (
+        blob::array::<_, sys::b3MeshNode>(data, len, data.nodeOffset, nc),
+        blob::array::<_, sys::b3Vec3>(data, len, data.vertexOffset, vc),
+        blob::array::<_, sys::b3MeshTriangle>(data, len, data.triangleOffset, tc),
+        blob::array::<_, u8>(data, len, data.materialOffset, tc),
+        blob::array::<_, u8>(data, len, data.flagsOffset, tc),
+    );
+    let (Some(nodes), Some(vertices), Some(triangles), Some(materials), Some(_flags)) = arrays else {
+        return Err("mesh array outside the blob");
+    };
+
+    if !blob::sane_aabb(&data.bounds) || !(data.surfaceArea.is_finite() && data.surfaceArea >= 0.0) {
+        return Err("mesh bounds or area not finite");
+    }
+    if !vertices.iter().all(blob::finite) {
+        return Err("mesh vertex not finite");
+    }
+    for t in triangles {
+        let (a, b, c) = (t.index1, t.index2, t.index3);
+        if [a, b, c].iter().any(|&i| i < 0 || i as usize >= vc) || a == b || a == c || b == c {
+            return Err("mesh triangle index out of range or repeated");
+        }
+    }
+    if materials.iter().any(|&m| m as i32 >= data.materialCount) {
+        return Err("mesh material index out of range");
+    }
+    if !nodes.iter().all(|n| blob::finite(&n.lowerBound) && blob::finite(&n.upperBound)) {
+        return Err("mesh node bounds not finite");
+    }
+
+    // Walk as b3SortMeshTriangles does (right child pushed first, same depth limit), carrying
+    // each subtree's node range [index, end).
+    let mut stack = [(0usize, 0usize); MESH_STACK_SIZE];
+    stack[0] = (0, nc);
+    let mut count = 1;
+    let mut next_triangle = 0;
+    while count > 0 {
+        count -= 1;
+        let (index, end) = stack[count];
+        let node = &nodes[index];
+        // SAFETY: both union views are the same 32-bit bitfield; any value is valid.
+        let (tag, high) = unsafe { (node.data.asLeaf.type_(), node.data.asLeaf.triangleCount()) };
+        if tag == LEAF_NODE {
+            let (offset, n) = (node.triangleOffset as usize, high as usize);
+            if end != index + 1 || offset != next_triangle || n == 0 || n > tc - offset {
+                return Err("mesh BVH leaf out of order");
+            }
+            for t in &triangles[offset..offset + n] {
+                // Indices were checked above.
+                for i in [t.index1, t.index2, t.index3] {
+                    if !contains(node, &vertices[i as usize]) {
+                        return Err("mesh BVH leaf does not bound its triangles");
+                    }
+                }
+            }
+            next_triangle += n;
+        } else {
+            let right = index + high as usize;
+            if !(index + 1 < right && right < end) {
+                return Err("mesh BVH child out of its subtree");
+            }
+            if count >= MESH_STACK_SIZE - 2 {
+                return Err("mesh BVH too deep");
+            }
+            if !contains_node(node, &nodes[index + 1]) || !contains_node(node, &nodes[right]) {
+                return Err("mesh BVH node does not bound its children");
+            }
+            stack[count] = (right, end);
+            stack[count + 1] = (index + 1, right);
+            count += 2;
+        }
+    }
+    if next_triangle != tc {
+        return Err("mesh BVH leaves do not cover the triangles");
+    }
+    Ok(())
 }
 
 impl core::fmt::Debug for Mesh {
