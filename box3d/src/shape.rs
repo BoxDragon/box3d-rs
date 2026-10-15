@@ -29,6 +29,8 @@ impl PartialEq for SurfaceMaterial {
             && a.tangentVelocity.z == b.tangentVelocity.z
             && a.userMaterialId == b.userMaterialId
             && a.customColor == b.customColor
+            && a.contactStiffness == b.contactStiffness
+            && a.contactDampingRatio == b.contactDampingRatio
     }
 }
 
@@ -61,6 +63,32 @@ impl SurfaceMaterial {
     pub fn user_material_id(mut self, id: u64) -> Self {
         self.0.userMaterialId = id;
         self
+    }
+    /// Physical contact stiffness in N/m for a whole contact (the total normal
+    /// spring over its points). `0` (default) is rigid. Positive: a resting
+    /// body overlaps by `load / stiffness`, independent of the bodies' masses
+    /// (the spring is turned into a per point softness from each point's
+    /// effective mass). Two soft shapes act in series, `kA * kB / (kA + kB)`.
+    /// Soft contacts have no speculative margin, no push-out speed cap and
+    /// no restitution: the spring and its damping are the whole response.
+    pub fn contact_stiffness(mut self, stiffness: f32) -> Self {
+        self.0.contactStiffness = stiffness;
+        self
+    }
+    /// Damping ratio of the contact spring (1 = critical, the default). Only
+    /// used when [`Self::contact_stiffness`] is positive; a soft pair uses the
+    /// larger ratio of its soft shapes.
+    pub fn contact_damping_ratio(mut self, damping_ratio: f32) -> Self {
+        self.0.contactDampingRatio = damping_ratio;
+        self
+    }
+    /// See [`Self::contact_stiffness`].
+    pub fn stiffness(&self) -> f32 {
+        self.0.contactStiffness
+    }
+    /// See [`Self::contact_damping_ratio`].
+    pub fn damping_ratio(&self) -> f32 {
+        self.0.contactDampingRatio
     }
     pub fn as_raw(&self) -> &sys::b3SurfaceMaterial {
         &self.0

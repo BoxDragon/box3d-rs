@@ -82,6 +82,7 @@ pub use glam::{Mat3, Quat, Vec3};
 
 mod blob;
 mod body;
+mod contact;
 mod delta;
 mod events;
 mod height_field;
@@ -96,6 +97,7 @@ mod shape;
 mod world;
 
 pub use body::{BodyDef, BodyType, MassData, MotionLocks, TIME_TO_SLEEP};
+pub use contact::{ContactData, ContactScratch, Manifold, ManifoldPoint};
 pub use delta::{DeltaStats, WorldDelta};
 pub use events::{
     BodyEvents, BodyMoveEvent, ContactBeginEvent, ContactEndEvent, ContactEvents, ContactHitEvent, JointEvent,

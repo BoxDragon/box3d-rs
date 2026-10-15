@@ -172,7 +172,7 @@ pub const B3_HULL_VERSION: u64 = 5353818467820062812;
 pub const B3_MESH_VERSION: i64 = -6148651537399239945;
 pub const B3_HEIGHT_FIELD_HOLE: u32 = 255;
 pub const B3_HEIGHT_FIELD_VERSION: i64 = -8196016980499085064;
-pub const B3_COMPOUND_VERSION: i64 = -8671959925828133022;
+pub const B3_COMPOUND_VERSION: i64 = -8671959925828133021;
 #[doc = " Prototype for user allocation function.\n\t@param size the allocation size in bytes\n\t@param alignment the required alignment, guaranteed to be a power of 2"]
 pub type b3AllocFcn = ::core::option::Option<
     unsafe extern "C" fn(size: usize, alignment: i32) -> *mut ::core::ffi::c_void,
@@ -866,12 +866,16 @@ pub struct b3SurfaceMaterial {
     pub userMaterialId: u64,
     #[doc = " Custom debug draw color. Ignored if 0. The low 24 bits are RGB. The high byte may\n carry a b3DebugMaterial preset, see b3MakeDebugColor.\n @see b3HexColor"]
     pub customColor: u32,
+    #[doc = " Physical contact stiffness in newtons per meter (N/m), for the contact as a whole: the total\n normal spring across all of its points. Zero (the default) is a rigid contact that uses the\n world contact softness. When positive the contact is a spring-damper: a resting body overlaps\n by load / stiffness. The spring is converted to a per point softness from each point's normal\n effective mass, so the overlap depends on the load and not on the masses of the bodies.\n Two soft shapes act as springs in series: kA * kB / (kA + kB). One soft shape: its stiffness.\n Soft contacts have no speculative margin, no push-out speed cap and no restitution."]
+    pub contactStiffness: f32,
+    #[doc = " Damping ratio of the contact spring, non-dimensional. 1 is critically damped. Only used\n when contactStiffness is positive. A soft pair uses the larger ratio of its soft shapes."]
+    pub contactDampingRatio: f32,
     #[doc = " Explicit padding. Must be zero."]
     pub padding: u32,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of b3SurfaceMaterial"][::core::mem::size_of::<b3SurfaceMaterial>() - 40usize];
+    ["Size of b3SurfaceMaterial"][::core::mem::size_of::<b3SurfaceMaterial>() - 48usize];
     ["Alignment of b3SurfaceMaterial"][::core::mem::align_of::<b3SurfaceMaterial>() - 8usize];
     ["Offset of field: b3SurfaceMaterial::friction"]
         [::core::mem::offset_of!(b3SurfaceMaterial, friction) - 0usize];
@@ -885,8 +889,12 @@ const _: () = {
         [::core::mem::offset_of!(b3SurfaceMaterial, userMaterialId) - 24usize];
     ["Offset of field: b3SurfaceMaterial::customColor"]
         [::core::mem::offset_of!(b3SurfaceMaterial, customColor) - 32usize];
+    ["Offset of field: b3SurfaceMaterial::contactStiffness"]
+        [::core::mem::offset_of!(b3SurfaceMaterial, contactStiffness) - 36usize];
+    ["Offset of field: b3SurfaceMaterial::contactDampingRatio"]
+        [::core::mem::offset_of!(b3SurfaceMaterial, contactDampingRatio) - 40usize];
     ["Offset of field: b3SurfaceMaterial::padding"]
-        [::core::mem::offset_of!(b3SurfaceMaterial, padding) - 36usize];
+        [::core::mem::offset_of!(b3SurfaceMaterial, padding) - 44usize];
 };
 #[doc = " A capsule is an extruded sphere"]
 pub const b3ShapeType_b3_capsuleShape: b3ShapeType = 0;
@@ -947,7 +955,7 @@ pub struct b3ShapeDef {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of b3ShapeDef"][::core::mem::size_of::<b3ShapeDef>() - 120usize];
+    ["Size of b3ShapeDef"][::core::mem::size_of::<b3ShapeDef>() - 128usize];
     ["Alignment of b3ShapeDef"][::core::mem::align_of::<b3ShapeDef>() - 8usize];
     ["Offset of field: b3ShapeDef::name"][::core::mem::offset_of!(b3ShapeDef, name) - 0usize];
     ["Offset of field: b3ShapeDef::userData"]
@@ -959,30 +967,30 @@ const _: () = {
     ["Offset of field: b3ShapeDef::baseMaterial"]
         [::core::mem::offset_of!(b3ShapeDef, baseMaterial) - 32usize];
     ["Offset of field: b3ShapeDef::density"]
-        [::core::mem::offset_of!(b3ShapeDef, density) - 72usize];
+        [::core::mem::offset_of!(b3ShapeDef, density) - 80usize];
     ["Offset of field: b3ShapeDef::explosionScale"]
-        [::core::mem::offset_of!(b3ShapeDef, explosionScale) - 76usize];
-    ["Offset of field: b3ShapeDef::filter"][::core::mem::offset_of!(b3ShapeDef, filter) - 80usize];
+        [::core::mem::offset_of!(b3ShapeDef, explosionScale) - 84usize];
+    ["Offset of field: b3ShapeDef::filter"][::core::mem::offset_of!(b3ShapeDef, filter) - 88usize];
     ["Offset of field: b3ShapeDef::enableCustomFiltering"]
-        [::core::mem::offset_of!(b3ShapeDef, enableCustomFiltering) - 104usize];
+        [::core::mem::offset_of!(b3ShapeDef, enableCustomFiltering) - 112usize];
     ["Offset of field: b3ShapeDef::isSensor"]
-        [::core::mem::offset_of!(b3ShapeDef, isSensor) - 105usize];
+        [::core::mem::offset_of!(b3ShapeDef, isSensor) - 113usize];
     ["Offset of field: b3ShapeDef::enableSensorEvents"]
-        [::core::mem::offset_of!(b3ShapeDef, enableSensorEvents) - 106usize];
+        [::core::mem::offset_of!(b3ShapeDef, enableSensorEvents) - 114usize];
     ["Offset of field: b3ShapeDef::enableContactEvents"]
-        [::core::mem::offset_of!(b3ShapeDef, enableContactEvents) - 107usize];
+        [::core::mem::offset_of!(b3ShapeDef, enableContactEvents) - 115usize];
     ["Offset of field: b3ShapeDef::enableHitEvents"]
-        [::core::mem::offset_of!(b3ShapeDef, enableHitEvents) - 108usize];
+        [::core::mem::offset_of!(b3ShapeDef, enableHitEvents) - 116usize];
     ["Offset of field: b3ShapeDef::enablePreSolveEvents"]
-        [::core::mem::offset_of!(b3ShapeDef, enablePreSolveEvents) - 109usize];
+        [::core::mem::offset_of!(b3ShapeDef, enablePreSolveEvents) - 117usize];
     ["Offset of field: b3ShapeDef::invokeContactCreation"]
-        [::core::mem::offset_of!(b3ShapeDef, invokeContactCreation) - 110usize];
+        [::core::mem::offset_of!(b3ShapeDef, invokeContactCreation) - 118usize];
     ["Offset of field: b3ShapeDef::updateBodyMass"]
-        [::core::mem::offset_of!(b3ShapeDef, updateBodyMass) - 111usize];
+        [::core::mem::offset_of!(b3ShapeDef, updateBodyMass) - 119usize];
     ["Offset of field: b3ShapeDef::enableSpeculativeContact"]
-        [::core::mem::offset_of!(b3ShapeDef, enableSpeculativeContact) - 112usize];
+        [::core::mem::offset_of!(b3ShapeDef, enableSpeculativeContact) - 120usize];
     ["Offset of field: b3ShapeDef::internalValue"]
-        [::core::mem::offset_of!(b3ShapeDef, internalValue) - 116usize];
+        [::core::mem::offset_of!(b3ShapeDef, internalValue) - 124usize];
 };
 impl Default for b3ShapeDef {
     fn default() -> Self {
@@ -3970,7 +3978,7 @@ pub struct b3CompoundCapsuleDef {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of b3CompoundCapsuleDef"][::core::mem::size_of::<b3CompoundCapsuleDef>() - 72usize];
+    ["Size of b3CompoundCapsuleDef"][::core::mem::size_of::<b3CompoundCapsuleDef>() - 80usize];
     ["Alignment of b3CompoundCapsuleDef"][::core::mem::align_of::<b3CompoundCapsuleDef>() - 8usize];
     ["Offset of field: b3CompoundCapsuleDef::capsule"]
         [::core::mem::offset_of!(b3CompoundCapsuleDef, capsule) - 0usize];
@@ -3990,7 +3998,7 @@ pub struct b3CompoundHullDef {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of b3CompoundHullDef"][::core::mem::size_of::<b3CompoundHullDef>() - 80usize];
+    ["Size of b3CompoundHullDef"][::core::mem::size_of::<b3CompoundHullDef>() - 88usize];
     ["Alignment of b3CompoundHullDef"][::core::mem::align_of::<b3CompoundHullDef>() - 8usize];
     ["Offset of field: b3CompoundHullDef::hull"]
         [::core::mem::offset_of!(b3CompoundHullDef, hull) - 0usize];
@@ -4058,7 +4066,7 @@ pub struct b3CompoundSphereDef {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of b3CompoundSphereDef"][::core::mem::size_of::<b3CompoundSphereDef>() - 56usize];
+    ["Size of b3CompoundSphereDef"][::core::mem::size_of::<b3CompoundSphereDef>() - 64usize];
     ["Alignment of b3CompoundSphereDef"][::core::mem::align_of::<b3CompoundSphereDef>() - 8usize];
     ["Offset of field: b3CompoundSphereDef::sphere"]
         [::core::mem::offset_of!(b3CompoundSphereDef, sphere) - 0usize];
