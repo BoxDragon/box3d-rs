@@ -36,6 +36,21 @@ impl BodyType {
     }
 }
 
+/// Axes a body may not move along (`linear`) or turn about (`angular`),
+/// world x, y, z: `b3MotionLocks`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MotionLocks {
+    pub linear: [bool; 3],
+    pub angular: [bool; 3],
+}
+
+impl MotionLocks {
+    pub(crate) fn to_raw(self) -> sys::b3MotionLocks {
+        let ([lx, ly, lz], [ax, ay, az]) = (self.linear, self.angular);
+        sys::b3MotionLocks { linearX: lx, linearY: ly, linearZ: lz, angularX: ax, angularY: ay, angularZ: az }
+    }
+}
+
 /// Body creation parameters: a value wrapper over `b3BodyDef` with by-value
 /// builder setters. `Default` is `b3DefaultBodyDef` (static body at origin).
 #[derive(Clone, Copy, Debug)]
@@ -116,6 +131,10 @@ impl BodyDef {
     /// Continuous collision against other dynamic bodies. Use sparingly.
     pub fn bullet(mut self, bullet: bool) -> Self {
         self.0.isBullet = bullet;
+        self
+    }
+    pub fn motion_locks(mut self, locks: MotionLocks) -> Self {
+        self.0.motionLocks = locks.to_raw();
         self
     }
     /// Skip rotation speed clamping (wheels, rolling barrels).
@@ -432,6 +451,13 @@ impl World {
         let b = self.body(id);
         // SAFETY: validated id.
         unsafe { sys::b3Body_SetBullet(b, bullet) }
+    }
+
+    #[track_caller]
+    pub fn set_body_motion_locks(&mut self, id: BodyId, locks: MotionLocks) {
+        let b = self.body(id);
+        // SAFETY: validated id.
+        unsafe { sys::b3Body_SetMotionLocks(b, locks.to_raw()) }
     }
 
     #[track_caller]

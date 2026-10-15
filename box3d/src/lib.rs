@@ -95,7 +95,7 @@ mod query;
 mod shape;
 mod world;
 
-pub use body::{BodyDef, BodyType, MassData, TIME_TO_SLEEP};
+pub use body::{BodyDef, BodyType, MassData, MotionLocks, TIME_TO_SLEEP};
 pub use delta::{DeltaStats, WorldDelta};
 pub use events::{
     BodyEvents, BodyMoveEvent, ContactBeginEvent, ContactEndEvent, ContactEvents, ContactHitEvent, JointEvent,
