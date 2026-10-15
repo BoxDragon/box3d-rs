@@ -106,7 +106,7 @@ pub use hull::Hull;
 pub use id::{BodyId, JointId, ShapeId, WorldId};
 pub use joint::{
     DistanceJointDef, DistanceJointId, FilterJointDef, JointType, MotorJointDef, MotorJointId, PrismaticJointDef, PrismaticJointId,
-    RevoluteJointDef, RevoluteJointId, SphericalJointDef, SphericalJointId, WeldJointDef, WeldJointId, WheelJointDef,
+    RevoluteJointDef, RevoluteJointId, RopeJointDef, RopeJointId, MAX_ROPE_POINTS, SphericalJointDef, SphericalJointId, WeldJointDef, WeldJointId, WheelJointDef,
     WheelJointId,
 };
 pub use math::{Pos, Transform};

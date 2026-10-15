@@ -7,7 +7,7 @@
 //! Local frames are relative to each body's **origin** (not center of mass).
 
 use crate::id::{BodyId, JointId};
-use crate::math::{from_v3, from_xf, quat, v3, xf};
+use crate::math::{Pos, from_pos, from_v3, from_xf, quat, v3, xf};
 use crate::{Quat, Transform, Vec3, World, sys};
 
 /// Joint type.
@@ -22,6 +22,7 @@ pub enum JointType {
     Spherical,
     Weld,
     Wheel,
+    Rope,
 }
 
 impl JointType {
@@ -35,7 +36,8 @@ impl JointType {
             sys::b3JointType_b3_revoluteJoint => JointType::Revolute,
             sys::b3JointType_b3_sphericalJoint => JointType::Spherical,
             sys::b3JointType_b3_weldJoint => JointType::Weld,
-            _ => JointType::Wheel,
+            sys::b3JointType_b3_wheelJoint => JointType::Wheel,
+            _ => JointType::Rope,
         }
     }
 }
@@ -777,4 +779,87 @@ impl MotorJointId {
     setter!(set_angular_damping_ratio, b3MotorJoint_SetAngularDampingRatio, ratio: f32 => ratio);
     setter!(set_max_spring_force, b3MotorJoint_SetMaxSpringForce, force: f32 => force);
     setter!(set_max_spring_torque, b3MotorJoint_SetMaxSpringTorque, torque: f32 => torque);
+}
+
+// ---------------------------------------------------------------------------
+// Rope joint
+
+typed_joint!(
+    /// Rope along a path of points on two bodies: it slides through the inner
+    /// points (sheaves, pulleys, lashing edges), pulls with one tension along
+    /// every segment and never pushes.
+    RopeJointId,
+    sys::b3JointType_b3_ropeJoint
+);
+
+joint_def!(
+    /// Rope joint definition: [`RopeJointDef::path`] sets the points, each on
+    /// body A or B (body-local, from the body's origin). C defaults: length 1,
+    /// inextensible (stiffness 0), damping ratio 1. The base frames are set
+    /// from the path.
+    RopeJointDef,
+    sys::b3RopeJointDef,
+    b3DefaultRopeJointDef
+);
+
+/// Most points a rope's path holds, ends included.
+pub const MAX_ROPE_POINTS: usize = sys::B3_MAX_ROPE_POINTS as usize;
+
+impl RopeJointDef {
+    /// The path, end to end: each point body-local, `true` when on body B.
+    /// Panics with fewer than 2 or more than [`MAX_ROPE_POINTS`] points.
+    #[track_caller]
+    pub fn path(mut self, points: &[(Vec3, bool)]) -> Self {
+        assert!((2..=MAX_ROPE_POINTS).contains(&points.len()), "a rope path has 2 to {MAX_ROPE_POINTS} points");
+        self.0.pointCount = points.len() as i32;
+        self.0.bodyBMask = 0;
+        for (i, &(p, on_b)) in points.iter().enumerate() {
+            self.0.localPoints[i] = v3(p);
+            self.0.bodyBMask |= (on_b as u32) << i;
+        }
+        self
+    }
+
+    field!(/// Most the path may measure (m), clamped to >= 0.005 m.
+        length, length, f32);
+    field!(/// Axial stiffness EA (N per unit strain): a stretch x pulls EA x / length. 0 = inextensible.
+        stiffness, stiffness, f32);
+    field!(/// Damping ratio of the stretch (with stiffness > 0).
+        damping_ratio, dampingRatio, f32);
+}
+
+impl World {
+    #[track_caller]
+    pub fn create_rope_joint(&mut self, def: &RopeJointDef) -> RopeJointId {
+        let d = def.validated(self);
+        assert!((2..=MAX_ROPE_POINTS as i32).contains(&d.pointCount), "a rope path has 2 to {MAX_ROPE_POINTS} points");
+        // SAFETY: bodies validated and owned by this world; point count in range.
+        RopeJointId(JointId(unsafe { sys::b3CreateRopeJoint(self.id, &d) }))
+    }
+}
+
+impl RopeJointId {
+    getter!(/// Most the path may measure.
+        length, b3RopeJoint_GetLength, f32);
+    setter!(/// Winch or ratchet: set the length (clamped to >= 0.005 m).
+        set_length, b3RopeJoint_SetLength, length: f32 => length);
+    getter!(stiffness, b3RopeJoint_GetStiffness, f32);
+    setter!(set_stiffness, b3RopeJoint_SetStiffness, stiffness: f32 => stiffness);
+    getter!(damping_ratio, b3RopeJoint_GetDampingRatio, f32);
+    setter!(set_damping_ratio, b3RopeJoint_SetDampingRatio, ratio: f32 => ratio);
+    getter!(/// The path's current length (sum of its segments).
+        current_length, b3RopeJoint_GetCurrentLength, f32);
+    getter!(/// Tension (N), the same in every segment; 0 while slack.
+        tension, b3RopeJoint_GetTension, f32);
+
+    /// The path's points in world space, into `out` (cleared first).
+    #[track_caller]
+    pub fn world_points(self, world: &World, out: &mut Vec<Pos>) {
+        let j = self.raw(world);
+        let mut raw = [sys::b3Pos::default(); MAX_ROPE_POINTS];
+        // SAFETY: validated id of the right type; `raw` holds MAX_ROPE_POINTS.
+        let n = unsafe { sys::b3RopeJoint_GetWorldPoints(j, raw.as_mut_ptr(), MAX_ROPE_POINTS as i32) };
+        out.clear();
+        out.extend(raw[..n.max(0) as usize].iter().map(|&p| from_pos(p)));
+    }
 }

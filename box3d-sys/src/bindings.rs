@@ -166,6 +166,7 @@ pub const B3_CHILD_POWER: u32 = 20;
 pub const B3_MAX_SHAPES: u32 = 4194304;
 pub const B3_MAX_CHILD_SHAPES: u32 = 1048576;
 pub const B3_MAX_MESH_CONTACT_TRIANGLES: u32 = 256;
+pub const B3_MAX_ROPE_POINTS: u32 = 8;
 pub const B3_DYNAMIC_TREE_VERSION: u64 = 2120997694728572561;
 pub const B3_HULL_VERSION: u64 = 5353818467820062812;
 pub const B3_MESH_VERSION: i64 = -6148651537399239945;
@@ -1121,6 +1122,7 @@ pub const b3JointType_b3_revoluteJoint: b3JointType = 5;
 pub const b3JointType_b3_sphericalJoint: b3JointType = 6;
 pub const b3JointType_b3_weldJoint: b3JointType = 7;
 pub const b3JointType_b3_wheelJoint: b3JointType = 8;
+pub const b3JointType_b3_ropeJoint: b3JointType = 9;
 #[doc = " Joint type enumeration. This is useful because all joint types use b3JointId and sometimes you\n want to get the type of a joint.\n @ingroup joint"]
 pub type b3JointType = ::core::ffi::c_uint;
 #[doc = " Base joint definition used by all joint types. The local frames are measured from the\n body's origin rather than the center of mass because:\n 1. You might not know where the center of mass will be.\n 2. If you add/remove shapes from a body and recompute the mass, the joints will be broken.\n @ingroup joint"]
@@ -1700,6 +1702,53 @@ const _: () = {
         [::core::mem::offset_of!(b3WheelJointDef, upperSteeringLimit) - 176usize];
 };
 impl Default for b3WheelJointDef {
+    fn default() -> Self {
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+#[doc = " Rope joint definition. A rope runs along a path of points, each fixed on body A or\n body B: end, then any points it passes through (sheaves, pulleys, the edges of a\n lashed crate), then the other end. It slides freely through the inner points, so\n every segment carries the same tension, and it only pulls: the constraint keeps the\n path's total length at most `length`. A static body stands in for the world.\n The base frames are unused (the points carry the attachments).\n @ingroup rope_joint"]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct b3RopeJointDef {
+    #[doc = " Base joint definition"]
+    pub base: b3JointDef,
+    #[doc = " Points along the path, local to their body's origin."]
+    pub localPoints: [b3Vec3; 8usize],
+    #[doc = " Number of points used, 2 to B3_MAX_ROPE_POINTS."]
+    pub pointCount: ::core::ffi::c_int,
+    #[doc = " Bit i set: point i is on body B, else on body A."]
+    pub bodyBMask: u32,
+    #[doc = " Rope length: the most the path may measure. Clamped to a stable minimum value."]
+    pub length: f32,
+    #[doc = " Axial stiffness EA (newtons per unit strain): stretching the rope by x pulls with\n EA x / length, so longer ropes are stretchier. Zero makes the rope inextensible."]
+    pub stiffness: f32,
+    #[doc = " Damping ratio of the stretch, non-dimensional. Applies when stiffness is non-zero."]
+    pub dampingRatio: f32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of b3RopeJointDef"][::core::mem::size_of::<b3RopeJointDef>() - 232usize];
+    ["Alignment of b3RopeJointDef"][::core::mem::align_of::<b3RopeJointDef>() - 8usize];
+    ["Offset of field: b3RopeJointDef::base"]
+        [::core::mem::offset_of!(b3RopeJointDef, base) - 0usize];
+    ["Offset of field: b3RopeJointDef::localPoints"]
+        [::core::mem::offset_of!(b3RopeJointDef, localPoints) - 112usize];
+    ["Offset of field: b3RopeJointDef::pointCount"]
+        [::core::mem::offset_of!(b3RopeJointDef, pointCount) - 208usize];
+    ["Offset of field: b3RopeJointDef::bodyBMask"]
+        [::core::mem::offset_of!(b3RopeJointDef, bodyBMask) - 212usize];
+    ["Offset of field: b3RopeJointDef::length"]
+        [::core::mem::offset_of!(b3RopeJointDef, length) - 216usize];
+    ["Offset of field: b3RopeJointDef::stiffness"]
+        [::core::mem::offset_of!(b3RopeJointDef, stiffness) - 220usize];
+    ["Offset of field: b3RopeJointDef::dampingRatio"]
+        [::core::mem::offset_of!(b3RopeJointDef, dampingRatio) - 224usize];
+};
+impl Default for b3RopeJointDef {
     fn default() -> Self {
         let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
@@ -5247,6 +5296,8 @@ unsafe extern "C" {
     pub fn b3DefaultWeldJointDef() -> b3WeldJointDef;
     #[doc = " Use this to initialize your joint definition\n @ingroup wheel_joint"]
     pub fn b3DefaultWheelJointDef() -> b3WheelJointDef;
+    #[doc = " Use this to initialize your joint definition\n @ingroup rope_joint"]
+    pub fn b3DefaultRopeJointDef() -> b3RopeJointDef;
     #[doc = " Use this to initialize your explosion definition\n @ingroup world"]
     pub fn b3DefaultExplosionDef() -> b3ExplosionDef;
     #[doc = " Use this to initialize your query filter"]
@@ -5922,7 +5973,7 @@ unsafe extern "C" {
     pub fn b3World_IsWarmStartingEnabled(worldId: b3WorldId) -> bool;
     #[doc = " Get the number of awake bodies"]
     pub fn b3World_GetAwakeBodyCount(worldId: b3WorldId) -> ::core::ffi::c_int;
-    #[doc = " Hash of every body's transform and velocity: the hash recordings store per step. Equal on two\n worlds exactly when those are bit-identical, so it detects divergence between runs or peers.\n @return 0 if the world is invalid or locked"]
+    #[doc = " Divergence hash of the simulation state, for comparing runs or peers (rollback). Covers per live\n body: slot index, generation, type, flags, awake/sleeping/disabled, sleep time, mass properties,\n damping, gravity scale, pending force and torque, transform and velocity; per live joint: slot\n index, generation, type, set, bodies and warm-start impulses. Not covered: shapes, contacts and\n their warm-start impulses, islands. Equal states hash equal; a differing hash means divergence.\n Not the per-step hash recordings store.\n @return 0 if the world is invalid or locked"]
     pub fn b3World_GetStateHash(worldId: b3WorldId) -> u64;
     #[doc = " Get the current world performance profile"]
     pub fn b3World_GetProfile(worldId: b3WorldId) -> b3Profile;
@@ -6876,6 +6927,32 @@ unsafe extern "C" {
     pub fn b3WheelJoint_GetSteeringAngle(jointId: b3JointId) -> f32;
     #[doc = " Get the current steering torque in N*m."]
     pub fn b3WheelJoint_GetSteeringTorque(jointId: b3JointId) -> f32;
+    #[doc = " Create a rope joint.\n @see b3RopeJointDef for details."]
+    pub fn b3CreateRopeJoint(worldId: b3WorldId, def: *const b3RopeJointDef) -> b3JointId;
+    #[doc = " Set the rope length (the most the path may measure). Keeps the tension built up."]
+    pub fn b3RopeJoint_SetLength(jointId: b3JointId, length: f32);
+    #[doc = " Get the rope length."]
+    pub fn b3RopeJoint_GetLength(jointId: b3JointId) -> f32;
+    #[doc = " Set the axial stiffness EA (newtons per unit strain; zero: inextensible)."]
+    pub fn b3RopeJoint_SetStiffness(jointId: b3JointId, stiffness: f32);
+    #[doc = " Get the axial stiffness."]
+    pub fn b3RopeJoint_GetStiffness(jointId: b3JointId) -> f32;
+    #[doc = " Set the damping ratio of the stretch."]
+    pub fn b3RopeJoint_SetDampingRatio(jointId: b3JointId, dampingRatio: f32);
+    #[doc = " Get the damping ratio."]
+    pub fn b3RopeJoint_GetDampingRatio(jointId: b3JointId) -> f32;
+    #[doc = " The path's current length (the sum of its segments)."]
+    pub fn b3RopeJoint_GetCurrentLength(jointId: b3JointId) -> f32;
+    #[doc = " The rope's tension in newtons (the same in every segment; zero while slack)."]
+    pub fn b3RopeJoint_GetTension(jointId: b3JointId) -> f32;
+    #[doc = " The number of points of the path."]
+    pub fn b3RopeJoint_GetPointCount(jointId: b3JointId) -> ::core::ffi::c_int;
+    #[doc = " The path's points in world space, at most `capacity`. Returns the number written."]
+    pub fn b3RopeJoint_GetWorldPoints(
+        jointId: b3JointId,
+        points: *mut b3Pos,
+        capacity: ::core::ffi::c_int,
+    ) -> ::core::ffi::c_int;
     #[doc = " Contact identifier validation. Provides validation for up to 2^32 allocations."]
     pub fn b3Contact_IsValid(id: b3ContactId) -> bool;
     #[doc = " Get the manifolds for a contact. The manifold may have no points if the contact is not touching."]
