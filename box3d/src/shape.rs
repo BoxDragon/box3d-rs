@@ -64,6 +64,10 @@ impl SurfaceMaterial {
         self.0.userMaterialId = id;
         self
     }
+    /// The id set by [`Self::user_material_id`].
+    pub fn user_material(&self) -> u64 {
+        self.0.userMaterialId
+    }
     /// Physical contact stiffness in N/m for a whole contact (the total normal
     /// spring over its points). `0` (default) is rigid. Positive: a resting
     /// body overlaps by `load / stiffness`, independent of the bodies' masses
