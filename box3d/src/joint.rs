@@ -786,8 +786,9 @@ impl MotorJointId {
 
 typed_joint!(
     /// Rope along a path of points on two bodies: it slides through the inner
-    /// points (sheaves, pulleys, lashing edges), pulls with one tension along
-    /// every segment and never pushes.
+    /// points (sheaves, pulleys, lashing edges), held by each one's friction
+    /// (capstan), and never pushes. Without friction every segment pulls with
+    /// one tension.
     RopeJointId,
     sys::b3JointType_b3_ropeJoint
 );
@@ -826,6 +827,15 @@ impl RopeJointDef {
         stiffness, stiffness, f32);
     field!(/// Damping ratio of the stretch (with stiffness > 0).
         damping_ratio, dampingRatio, f32);
+
+    /// Friction coefficient between the rope and inner point `index` (0: free;
+    /// ~0.25 rope on iron, ~0.4 on wood or rope). The ends' are unused.
+    /// Panics on an index past [`MAX_ROPE_POINTS`].
+    #[track_caller]
+    pub fn friction(mut self, index: usize, friction: f32) -> Self {
+        self.0.friction[index] = friction;
+        self
+    }
 }
 
 impl World {
@@ -849,8 +859,31 @@ impl RopeJointId {
     setter!(set_damping_ratio, b3RopeJoint_SetDampingRatio, ratio: f32 => ratio);
     getter!(/// The path's current length (sum of its segments).
         current_length, b3RopeJoint_GetCurrentLength, f32);
-    getter!(/// Tension (N), the same in every segment; 0 while slack.
+    getter!(/// Tension (N) of the most loaded segment (every segment's without
+        /// friction); 0 while slack.
         tension, b3RopeJoint_GetTension, f32);
+
+    /// Each segment's tension (N), end to end (segment `i` from point `i` to
+    /// `i + 1`; zeros past the last).
+    #[track_caller]
+    pub fn segment_tensions(self, world: &World) -> [f32; MAX_ROPE_POINTS] {
+        let j = self.raw(world);
+        let mut raw = [0.0f32; MAX_ROPE_POINTS];
+        // SAFETY: validated id of the right type; `raw` holds MAX_ROPE_POINTS.
+        unsafe { sys::b3RopeJoint_GetSegmentTensions(j, raw.as_mut_ptr(), MAX_ROPE_POINTS as i32) };
+        raw
+    }
+
+    /// The energy (J) friction took where the rope slipped over each point
+    /// during the last step, by point (the ends' 0).
+    #[track_caller]
+    pub fn slip_energies(self, world: &World) -> [f32; MAX_ROPE_POINTS] {
+        let j = self.raw(world);
+        let mut raw = [0.0f32; MAX_ROPE_POINTS];
+        // SAFETY: validated id of the right type; `raw` holds MAX_ROPE_POINTS.
+        unsafe { sys::b3RopeJoint_GetSlipEnergies(j, raw.as_mut_ptr(), MAX_ROPE_POINTS as i32) };
+        raw
+    }
 
     /// The path's points in world space, into `out` (cleared first).
     #[track_caller]

@@ -1718,7 +1718,7 @@ impl Default for b3WheelJointDef {
         }
     }
 }
-#[doc = " Rope joint definition. A rope runs along a path of points, each fixed on body A or\n body B: end, then any points it passes through (sheaves, pulleys, the edges of a\n lashed crate), then the other end. It slides freely through the inner points, so\n every segment carries the same tension, and it only pulls: the constraint keeps the\n path's total length at most `length`. A static body stands in for the world.\n The base frames are unused (the points carry the attachments).\n @ingroup rope_joint"]
+#[doc = " Rope joint definition. A rope runs along a path of points, each fixed on body A or\n body B: end, then any points it passes through (sheaves, pulleys, the edges of a\n lashed crate), then the other end. It slides through the inner points, and it only\n pulls: the constraint keeps the path's total length at most `length`. Without friction\n every segment carries the same tension. With friction at an inner point the rope grips\n it (capstan friction): it holds there until one side pulls more than e^(friction * wrap)\n times the other, wrap being the angle the path turns through at the point, and slips\n past that, losing energy as it goes. A static body stands in for the world.\n The base frames are unused (the points carry the attachments).\n @ingroup rope_joint"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct b3RopeJointDef {
@@ -1736,10 +1736,12 @@ pub struct b3RopeJointDef {
     pub stiffness: f32,
     #[doc = " Damping ratio of the stretch, non-dimensional. Applies when stiffness is non-zero."]
     pub dampingRatio: f32,
+    #[doc = " Friction coefficient between the rope and each point it passes through (zero:\n free; about 0.25 for rope on iron, 0.4 on wood or rope). The ends' are unused."]
+    pub friction: [f32; 8usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of b3RopeJointDef"][::core::mem::size_of::<b3RopeJointDef>() - 232usize];
+    ["Size of b3RopeJointDef"][::core::mem::size_of::<b3RopeJointDef>() - 264usize];
     ["Alignment of b3RopeJointDef"][::core::mem::align_of::<b3RopeJointDef>() - 8usize];
     ["Offset of field: b3RopeJointDef::base"]
         [::core::mem::offset_of!(b3RopeJointDef, base) - 0usize];
@@ -1755,6 +1757,8 @@ const _: () = {
         [::core::mem::offset_of!(b3RopeJointDef, stiffness) - 220usize];
     ["Offset of field: b3RopeJointDef::dampingRatio"]
         [::core::mem::offset_of!(b3RopeJointDef, dampingRatio) - 224usize];
+    ["Offset of field: b3RopeJointDef::friction"]
+        [::core::mem::offset_of!(b3RopeJointDef, friction) - 228usize];
 };
 impl Default for b3RopeJointDef {
     fn default() -> Self {
@@ -6951,8 +6955,20 @@ unsafe extern "C" {
     pub fn b3RopeJoint_GetDampingRatio(jointId: b3JointId) -> f32;
     #[doc = " The path's current length (the sum of its segments)."]
     pub fn b3RopeJoint_GetCurrentLength(jointId: b3JointId) -> f32;
-    #[doc = " The rope's tension in newtons (the same in every segment; zero while slack)."]
+    #[doc = " The rope's tension in newtons: its most loaded segment's (every segment's, without\n friction; zero while slack)."]
     pub fn b3RopeJoint_GetTension(jointId: b3JointId) -> f32;
+    #[doc = " Each segment's tension in newtons, end to end, at most `capacity`. Returns the number\n written (the point count less one)."]
+    pub fn b3RopeJoint_GetSegmentTensions(
+        jointId: b3JointId,
+        tensions: *mut f32,
+        capacity: ::core::ffi::c_int,
+    ) -> ::core::ffi::c_int;
+    #[doc = " The energy friction took where the rope slipped over each point during the last\n step, in joules, at most `capacity` (the ends' are zero). Returns the number written."]
+    pub fn b3RopeJoint_GetSlipEnergies(
+        jointId: b3JointId,
+        energies: *mut f32,
+        capacity: ::core::ffi::c_int,
+    ) -> ::core::ffi::c_int;
     #[doc = " The number of points of the path."]
     pub fn b3RopeJoint_GetPointCount(jointId: b3JointId) -> ::core::ffi::c_int;
     #[doc = " The path's points in world space, at most `capacity`. Returns the number written."]

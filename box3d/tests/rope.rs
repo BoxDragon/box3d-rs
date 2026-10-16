@@ -138,3 +138,88 @@ fn rope_between_two_dynamic_bodies_pulls_both() {
     assert!(p.length() < 1e-3, "momentum stays zero");
     assert!(rope.tension(&w) >= 0.0);
 }
+
+/// A crane hook (10 kg) hung on a hoist rope, a 25 kg crate slung under it by
+/// one sling from eye to eye through the hook's seat, `friction` at the seat.
+/// The hook is kicked sideways; returns how much rope still runs through the
+/// seat (the legs' length difference, max - min over the last second) and the
+/// slip energy the seat took over the run.
+fn kicked_sling(friction: f32) -> (f32, f32) {
+    let mut w = world();
+    let ceiling = w.create_body(&BodyDef::fixed(Pos::new(0.0, 10.0, 0.0)));
+    let hook = w.create_body(&BodyDef::dynamic(Pos::new(0.0, 7.9, 0.0)));
+    w.create_box_shape(hook, &ShapeDef::default().density(1250.0), Vec3::splat(0.1));
+    let crate_ = load(&mut w, Pos::new(0.0, 6.582, 0.0));
+    w.create_rope_joint(&RopeJointDef::new(ceiling, hook).path(&[(Vec3::ZERO, false), (Vec3::new(0.0, 0.1, 0.0), true)]).length(2.0));
+    let path = [(Vec3::new(-0.25, 0.25, 0.0), false), (Vec3::new(0.0, -0.1, 0.0), true), (Vec3::new(0.25, 0.25, 0.0), false)];
+    let sling = w.create_rope_joint(&RopeJointDef::new(crate_, hook).path(&path).length(2.0).friction(1, friction));
+    w.set_body_linear_velocity(hook, Vec3::new(1.0, 0.0, 0.5));
+
+    let mut slipped = 0.0;
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    let mut points = Vec::new();
+    for step in 0..600 {
+        w.step(DT, SUBSTEPS);
+        slipped += sling.slip_energies(&w)[1];
+        if step >= 540 {
+            sling.world_points(&w, &mut points);
+            let legs = ((points[1] - points[0]).length() - (points[2] - points[1]).length()) as f32;
+            lo = lo.min(legs);
+            hi = hi.max(legs);
+        }
+        // Capstan: one leg holds at most e^(friction * wrap) times the other, the
+        // wrap under pi here.
+        let tensions = sling.segment_tensions(&w);
+        let bound = (friction * std::f32::consts::PI).exp() * 1.01;
+        assert!(tensions[0] <= bound * tensions[1] + 1.0 && tensions[1] <= bound * tensions[0] + 1.0, "{tensions:?}");
+    }
+    (hi - lo, slipped)
+}
+
+#[test]
+fn sling_slides_freely_without_friction() {
+    let (sliding, slipped) = kicked_sling(0.0);
+    println!("frictionless sling: legs vary {sliding} m");
+    assert!(sliding > 0.02, "the hook keeps riding the sling, legs vary {sliding} m");
+    assert_eq!(slipped, 0.0);
+}
+
+#[test]
+fn friction_at_the_hook_stops_the_sling_sliding() {
+    let (sliding, slipped) = kicked_sling(0.3);
+    println!("sling at 0.3: legs vary {sliding} m, slip energy {slipped} J");
+    assert!(sliding < 0.002, "the hook settles on the sling, legs vary {sliding} m");
+    // Out of the kick's 6.25 J; the rest swings the whole rig.
+    assert!(slipped > 0.1 && slipped < 6.25, "friction took {slipped} J");
+}
+
+#[test]
+fn capstan_holds_unequal_legs() {
+    // A crate slung from a fixed hook with its centre off to one side of the
+    // eyes: without friction it slides until the legs pull alike; with enough
+    // friction the legs hold different tensions instead.
+    let tensions = |friction: f32| {
+        let mut w = world();
+        let ceiling = w.create_body(&BodyDef::fixed(Pos::new(0.0, 10.0, 0.0)));
+        let b = load(&mut w, Pos::new(0.0, 8.5, 0.0));
+        let path = [(Vec3::new(-0.25, 0.25, 0.0), true), (Vec3::ZERO, false), (Vec3::new(0.25, 0.25, 0.0), true)];
+        // Taut as placed: two 1.27 m legs.
+        let length = 2.0 * (0.25f32 * 0.25 + 1.25 * 1.25).sqrt();
+        let rope = w.create_rope_joint(&RopeJointDef::new(ceiling, b).path(&path).length(length).friction(1, friction));
+        // Push the crate's end down on one side: a 5 kg weight hung off the right eye.
+        let weight = w.create_body(&BodyDef::dynamic(Pos::new(0.25, 8.0, 0.0)));
+        w.create_box_shape(weight, &ShapeDef::default().density(200.0 * 0.2), Vec3::splat(0.25));
+        w.create_rope_joint(
+            &RopeJointDef::new(b, weight).path(&[(Vec3::new(0.25, 0.0, 0.0), false), (Vec3::new(0.0, 0.25, 0.0), true)]).length(0.25),
+        );
+        settle(&mut w, 600);
+        let t = rope.segment_tensions(&w);
+        (t, w.body_rotation(b))
+    };
+    let (free, _) = tensions(0.0);
+    println!("frictionless legs {free:?}");
+    assert!((free[0] - free[1]).abs() < 0.02 * free[0], "one tension without friction");
+    let (held, q) = tensions(1.5);
+    println!("legs at 1.5 {held:?}, crate {q:?}");
+    assert!(held[1] > 1.1 * held[0], "the loaded leg pulls harder: {held:?}");
+}
