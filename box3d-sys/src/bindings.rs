@@ -1718,7 +1718,7 @@ impl Default for b3WheelJointDef {
         }
     }
 }
-#[doc = " Rope joint definition. A rope runs along a path of points, each fixed on body A or\n body B: end, then any points it passes through (sheaves, pulleys, the edges of a\n lashed crate), then the other end. It slides through the inner points, and it only\n pulls: the constraint keeps the path's total length at most `length`. Without friction\n every segment carries the same tension. With friction at an inner point the rope grips\n it (capstan friction): it holds there until one side pulls more than e^(friction * wrap)\n times the other, wrap being the angle the path turns through at the point, and slips\n past that, losing energy as it goes. A static body stands in for the world.\n The base frames are unused (the points carry the attachments).\n @ingroup rope_joint"]
+#[doc = " Rope joint definition. A rope runs along a path of points, each fixed on body A or\n body B: end, then any points it passes through (sheaves, pulleys, the edges of a\n lashed crate), then the other end. It slides through the inner points, and it only\n pulls: the constraint keeps the path's total length at most `length`. Without friction\n every segment carries the same tension. With friction at an inner point the rope grips\n it (capstan friction): it holds there until one side pulls more than e^(friction * wrap)\n times the other, wrap being the angle the path turns through at the point, and slips\n past that, losing energy as it goes. Bending stiffness and damping resist a segment\n turning on the body at either end of it (a hook swinging under its sheave). A static\n body stands in for the world. The base frames are unused (the points carry the\n attachments).\n @ingroup rope_joint"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct b3RopeJointDef {
@@ -1738,10 +1738,14 @@ pub struct b3RopeJointDef {
     pub dampingRatio: f32,
     #[doc = " Friction coefficient between the rope and each point it passes through (zero:\n free; about 0.25 for rope on iron, 0.4 on wood or rope). The ends' are unused."]
     pub friction: [f32; 8usize],
+    #[doc = " Bending stiffness EI (newton square meters): a segment turned by an angle on the\n body at one of its ends, away from the direction it had there when the joint was\n created, is bent back with a moment EI angle / segment length. Zero: the rope\n hangs freely."]
+    pub bendStiffness: f32,
+    #[doc = " Bending damping (newton square meter seconds), the rope's internal friction: a\n segment turning on the body at one of its ends at an angular rate w is held back\n with a moment bendDamping w / segment length. It takes the energy out of a load\n swinging on the rope."]
+    pub bendDamping: f32,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of b3RopeJointDef"][::core::mem::size_of::<b3RopeJointDef>() - 264usize];
+    ["Size of b3RopeJointDef"][::core::mem::size_of::<b3RopeJointDef>() - 272usize];
     ["Alignment of b3RopeJointDef"][::core::mem::align_of::<b3RopeJointDef>() - 8usize];
     ["Offset of field: b3RopeJointDef::base"]
         [::core::mem::offset_of!(b3RopeJointDef, base) - 0usize];
@@ -1759,6 +1763,10 @@ const _: () = {
         [::core::mem::offset_of!(b3RopeJointDef, dampingRatio) - 224usize];
     ["Offset of field: b3RopeJointDef::friction"]
         [::core::mem::offset_of!(b3RopeJointDef, friction) - 228usize];
+    ["Offset of field: b3RopeJointDef::bendStiffness"]
+        [::core::mem::offset_of!(b3RopeJointDef, bendStiffness) - 260usize];
+    ["Offset of field: b3RopeJointDef::bendDamping"]
+        [::core::mem::offset_of!(b3RopeJointDef, bendDamping) - 264usize];
 };
 impl Default for b3RopeJointDef {
     fn default() -> Self {
@@ -6953,6 +6961,14 @@ unsafe extern "C" {
     pub fn b3RopeJoint_SetDampingRatio(jointId: b3JointId, dampingRatio: f32);
     #[doc = " Get the damping ratio."]
     pub fn b3RopeJoint_GetDampingRatio(jointId: b3JointId) -> f32;
+    #[doc = " Set the bending stiffness EI (newton square meters). @see b3RopeJointDef::bendStiffness"]
+    pub fn b3RopeJoint_SetBendStiffness(jointId: b3JointId, bendStiffness: f32);
+    #[doc = " Get the bending stiffness."]
+    pub fn b3RopeJoint_GetBendStiffness(jointId: b3JointId) -> f32;
+    #[doc = " Set the bending damping (newton square meter seconds). @see b3RopeJointDef::bendDamping"]
+    pub fn b3RopeJoint_SetBendDamping(jointId: b3JointId, bendDamping: f32);
+    #[doc = " Get the bending damping."]
+    pub fn b3RopeJoint_GetBendDamping(jointId: b3JointId) -> f32;
     #[doc = " The path's current length (the sum of its segments)."]
     pub fn b3RopeJoint_GetCurrentLength(jointId: b3JointId) -> f32;
     #[doc = " The rope's tension in newtons: its most loaded segment's (every segment's, without\n friction; zero while slack)."]

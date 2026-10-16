@@ -796,7 +796,7 @@ typed_joint!(
 joint_def!(
     /// Rope joint definition: [`RopeJointDef::path`] sets the points, each on
     /// body A or B (body-local, from the body's origin). C defaults: length 1,
-    /// inextensible (stiffness 0), damping ratio 1. The base frames are set
+    /// inextensible (stiffness 0), damping ratio 1, no bending. The base frames are set
     /// from the path.
     RopeJointDef,
     sys::b3RopeJointDef,
@@ -827,6 +827,15 @@ impl RopeJointDef {
         stiffness, stiffness, f32);
     field!(/// Damping ratio of the stretch (with stiffness > 0).
         damping_ratio, dampingRatio, f32);
+    field!(/// Bending stiffness EI (N m²): a segment turned by an angle on the body
+        /// at either end, from its direction there at creation, is bent back with
+        /// EI angle / segment length (N m). 0 = hangs freely.
+        bend_stiffness, bendStiffness, f32);
+    field!(/// Bending damping (N m² s), the rope's internal friction: a segment
+        /// turning on the body at either end at w (rad/s) is held back with
+        /// bend_damping w / segment length (N m). Takes the energy out of a
+        /// load swinging on the rope.
+        bend_damping, bendDamping, f32);
 
     /// Friction coefficient between the rope and inner point `index` (0: free;
     /// ~0.25 rope on iron, ~0.4 on wood or rope). The ends' are unused.
@@ -857,6 +866,10 @@ impl RopeJointId {
     setter!(set_stiffness, b3RopeJoint_SetStiffness, stiffness: f32 => stiffness);
     getter!(damping_ratio, b3RopeJoint_GetDampingRatio, f32);
     setter!(set_damping_ratio, b3RopeJoint_SetDampingRatio, ratio: f32 => ratio);
+    getter!(bend_stiffness, b3RopeJoint_GetBendStiffness, f32);
+    setter!(set_bend_stiffness, b3RopeJoint_SetBendStiffness, stiffness: f32 => stiffness);
+    getter!(bend_damping, b3RopeJoint_GetBendDamping, f32);
+    setter!(set_bend_damping, b3RopeJoint_SetBendDamping, damping: f32 => damping);
     getter!(/// The path's current length (sum of its segments).
         current_length, b3RopeJoint_GetCurrentLength, f32);
     getter!(/// Tension (N) of the most loaded segment (every segment's without

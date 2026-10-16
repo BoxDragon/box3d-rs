@@ -223,3 +223,76 @@ fn capstan_holds_unequal_legs() {
     println!("legs at 1.5 {held:?}, crate {q:?}");
     assert!(held[1] > 1.1 * held[0], "the loaded leg pulls harder: {held:?}");
 }
+
+/// A 25 kg load hung 3 m under a sheave (the rope's end 2 m along the
+/// ceiling), kicked sideways at 2 m/s, out of the sheave's plane. Returns the
+/// most it swings out (m) over the first second and over the 10th.
+fn kicked_hook(bend_damping: f32) -> (f32, f32) {
+    let mut w = world();
+    let ceiling = w.create_body(&BodyDef::fixed(Pos::new(0.0, 10.0, 0.0)));
+    let b = load(&mut w, Pos::new(0.0, 7.0, 0.0));
+    let path = [(Vec3::new(-2.0, 0.0, 0.0), false), (Vec3::ZERO, false), (Vec3::ZERO, true)];
+    w.create_rope_joint(&RopeJointDef::new(ceiling, b).path(&path).length(5.0).bend_damping(bend_damping));
+    w.set_body_linear_velocity(b, Vec3::new(0.0, 0.0, 2.0));
+    let mut first = 0.0f32;
+    let mut tenth = 0.0f32;
+    for step in 0..600 {
+        w.step(DT, SUBSTEPS);
+        let out = (w.body_position(b).z as f32).abs();
+        match step {
+            0..60 => first = first.max(out),
+            540.. => tenth = tenth.max(out),
+            _ => {}
+        }
+    }
+    (first, tenth)
+}
+
+#[test]
+fn bending_damping_stills_a_swinging_hook() {
+    let (first, tenth) = kicked_hook(0.0);
+    println!("free: {first} m, then {tenth} m");
+    assert!(first > 0.5 && tenth > 0.9 * first, "a frictionless rope swings on: {first} then {tenth}");
+
+    // 400 N m² s on 3 m: 133 N m s against the swing's 225 kg m², about 0.3/s.
+    let (first, tenth) = kicked_hook(400.0);
+    println!("damped: {first} m, then {tenth} m");
+    assert!(first > 0.4, "the kick still swings it: {first}");
+    assert!(tenth < 0.15 * first, "the swing dies down: {first} then {tenth}");
+}
+
+/// Swing angle a steady side force holds a 25 kg load at, 3 m under a fixed
+/// point, with the rope's bending stiffness `ei`.
+fn side_pushed(ei: f32) -> f32 {
+    let mut w = world();
+    let ceiling = w.create_body(&BodyDef::fixed(Pos::new(0.0, 10.0, 0.0)));
+    let b = load(&mut w, Pos::new(0.0, 7.0, 0.0));
+    w.create_rope_joint(
+        &RopeJointDef::new(ceiling, b)
+            .path(&[(Vec3::ZERO, false), (Vec3::ZERO, true)])
+            .length(3.0)
+            .bend_stiffness(ei)
+            .bend_damping(600.0),
+    );
+    for _ in 0..900 {
+        w.apply_force_to_center(b, Vec3::new(0.4 * w.body_mass(b) * gravity(&w), 0.0, 0.0), true);
+        w.step(DT, SUBSTEPS);
+    }
+    let p = w.body_position(b);
+    (p.x as f32).atan2(10.0 - p.y as f32)
+}
+
+#[test]
+fn bending_stiffness_straightens_the_rope() {
+    // Free: tan(angle) = side / weight = 0.4.
+    let free = side_pushed(0.0);
+    println!("free angle {free}");
+    assert!((free - 0.4f32.atan()).abs() < 0.01, "got {free}");
+
+    // EI 1125 on 3 m: 375 N m per radian at the ceiling. About the ceiling,
+    // 0.4 W L cos(a) = W L sin(a) + 375 a, with W L = 750 N m: a = 0.26.
+    // (The load turns freely to the rope: its end takes no moment once still.)
+    let stiff = side_pushed(1125.0);
+    println!("stiff angle {stiff}");
+    assert!((stiff - 0.2597).abs() < 0.01, "got {stiff}");
+}
