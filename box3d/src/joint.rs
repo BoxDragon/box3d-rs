@@ -887,6 +887,34 @@ impl RopeJointId {
         raw
     }
 
+    /// Each segment's rest directions `[start, end]`: its direction when the
+    /// rope was created, local to the body holding its start point and to
+    /// the one holding its end point; bending turns the segment back toward
+    /// them (only a segment leaving one body for the other bends). Segment
+    /// `i` runs from point `i` to `i + 1`; zeros past the last.
+    #[track_caller]
+    pub fn rest_directions(self, world: &World) -> [[Vec3; 2]; MAX_ROPE_POINTS] {
+        let j = self.raw(world);
+        let mut start = [sys::b3Vec3::default(); MAX_ROPE_POINTS];
+        let mut end = [sys::b3Vec3::default(); MAX_ROPE_POINTS];
+        // SAFETY: validated id of the right type; both hold MAX_ROPE_POINTS.
+        unsafe { sys::b3RopeJoint_GetRestDirections(j, start.as_mut_ptr(), end.as_mut_ptr(), MAX_ROPE_POINTS as i32) };
+        std::array::from_fn(|i| [from_v3(start[i]), from_v3(end[i])])
+    }
+
+    /// Set segment `segment`'s rest directions (see
+    /// [`Self::rest_directions`]): a rope created again from saved state (a
+    /// loaded world, a joining peer) takes the rest its predecessor had
+    /// instead of its directions at creation. An out-of-range segment or a
+    /// non-finite direction is ignored.
+    #[track_caller]
+    pub fn set_rest_directions(self, world: &mut World, segment: usize, start: Vec3, end: Vec3) {
+        let j = self.raw(world);
+        let Ok(segment) = i32::try_from(segment) else { return };
+        // SAFETY: validated id of the right type; the segment is range-checked there.
+        unsafe { sys::b3RopeJoint_SetRestDirections(j, segment, v3(start), v3(end)) }
+    }
+
     /// The energy (J) friction took where the rope slipped over each point
     /// during the last step, by point (the ends' 0).
     #[track_caller]

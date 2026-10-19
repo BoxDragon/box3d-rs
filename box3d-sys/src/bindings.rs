@@ -6969,6 +6969,20 @@ unsafe extern "C" {
     pub fn b3RopeJoint_SetBendDamping(jointId: b3JointId, bendDamping: f32);
     #[doc = " Get the bending damping."]
     pub fn b3RopeJoint_GetBendDamping(jointId: b3JointId) -> f32;
+    #[doc = " Set segment `segment`'s rest directions: its direction when the rope was created, local\n to the body holding its start point (`start`) and the one holding its end point (`end`).\n Bending turns a segment back toward them. A rope created again from saved state (a\n loaded world, a joining peer) takes the rest its predecessor had instead of its\n directions at creation. Unit vectors (zero: no rest); an invalid segment or vector is\n ignored."]
+    pub fn b3RopeJoint_SetRestDirections(
+        jointId: b3JointId,
+        segment: ::core::ffi::c_int,
+        start: b3Vec3,
+        end: b3Vec3,
+    );
+    #[doc = " Each segment's rest directions (see b3RopeJoint_SetRestDirections), end to end, at most\n `capacity`. Returns the number written (the point count less one)."]
+    pub fn b3RopeJoint_GetRestDirections(
+        jointId: b3JointId,
+        start: *mut b3Vec3,
+        end: *mut b3Vec3,
+        capacity: ::core::ffi::c_int,
+    ) -> ::core::ffi::c_int;
     #[doc = " The path's current length (the sum of its segments)."]
     pub fn b3RopeJoint_GetCurrentLength(jointId: b3JointId) -> f32;
     #[doc = " The rope's tension in newtons: its most loaded segment's (every segment's, without\n friction; zero while slack)."]

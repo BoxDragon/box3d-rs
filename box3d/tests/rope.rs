@@ -296,3 +296,63 @@ fn bending_stiffness_straightens_the_rope() {
     println!("stiff angle {stiff}");
     assert!((stiff - 0.2597).abs() < 0.01, "got {stiff}");
 }
+
+/// A stiff rope pulled aside rests where it was created: its rest
+/// directions are the segment's direction then, in each end body's frame.
+/// Made again mid-swing (a loaded world), a rope takes its directions at
+/// creation as rest unless given its predecessor's
+/// (`set_rest_directions`); given them, it swings on as the original does.
+#[test]
+fn a_rope_made_again_takes_its_predecessors_rest() {
+    let make = |w: &mut World, ceiling: BodyId, b: BodyId| {
+        w.create_rope_joint(
+            &RopeJointDef::new(ceiling, b)
+                .path(&[(Vec3::ZERO, false), (Vec3::ZERO, true)])
+                .length(3.0)
+                .bend_stiffness(1125.0)
+                .bend_damping(50.0),
+        )
+    };
+    let mut w = world();
+    let ceiling = w.create_body(&BodyDef::fixed(Pos::new(0.0, 10.0, 0.0)));
+    let b = load(&mut w, Pos::new(0.0, 7.0, 0.0));
+    let rope = make(&mut w, ceiling, b);
+    let rest = rope.rest_directions(&w);
+    assert!((rest[0][0] - Vec3::NEG_Y).length() < 1e-5 && (rest[0][1] - Vec3::NEG_Y).length() < 1e-5, "straight down: {rest:?}");
+    assert_eq!(rest[1], [Vec3::ZERO; 2], "one segment");
+
+    // Kicked: mid-swing after 20 steps.
+    w.set_body_linear_velocity(b, Vec3::new(3.0, 0.0, 0.0));
+    settle(&mut w, 20);
+    let (p, q, v, av) = (w.body_position(b), w.body_rotation(b), w.body_linear_velocity(b), w.body_angular_velocity(b));
+    assert!((p.x as f32) > 0.3, "swung out: {p:?}");
+
+    // The same state, the rope made again: once with the original's rest,
+    // once without.
+    let again = |rest: Option<[[Vec3; 2]; MAX_ROPE_POINTS]>| {
+        let mut w2 = world();
+        let ceiling = w2.create_body(&BodyDef::fixed(Pos::new(0.0, 10.0, 0.0)));
+        let b2 = w2.create_body(&BodyDef::dynamic(p).rotation(q));
+        w2.create_box_shape(b2, &ShapeDef::default().density(200.0), Vec3::splat(0.25));
+        w2.set_body_linear_velocity(b2, v);
+        w2.set_body_angular_velocity(b2, av);
+        let rope2 = make(&mut w2, ceiling, b2);
+        assert!((rope2.rest_directions(&w2)[0][0] - Vec3::NEG_Y).length() > 0.05, "made askew: its directions now");
+        if let Some(rest) = rest {
+            for (i, [s, e]) in rest.iter().enumerate() {
+                rope2.set_rest_directions(&mut w2, i, *s, *e);
+            }
+            assert_eq!(rope2.rest_directions(&w2), rest);
+        }
+        settle(&mut w2, 120);
+        w2.body_position(b2)
+    };
+    settle(&mut w, 120);
+    let original = w.body_position(b);
+    let kept = again(Some(rest));
+    let askew = again(None);
+    let off = |a: Pos| ((a.x - original.x) as f32).hypot((a.y - original.y) as f32);
+    println!("original {original:?}, with the rest {kept:?} ({}), askew {askew:?} ({})", off(kept), off(askew));
+    assert!(off(kept) < 0.01, "swings on as the original: {}", off(kept));
+    assert!(off(askew) > 10.0 * off(kept).max(1e-3), "a rope resting askew swings elsewhere: {}", off(askew));
+}
