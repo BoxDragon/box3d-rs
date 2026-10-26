@@ -312,3 +312,88 @@ fn many_worlds_on_many_threads() {
         h.join().unwrap();
     }
 }
+
+/// A 1 m box (1000 kg) on a joint from a fixed post at height 3, frame A's x
+/// axis turned to `axis`, settled: the constraint force on it (N, world).
+fn settled_force(make: impl FnOnce(&mut World, BodyId, BodyId, Transform) -> JointId) -> (Vec3, f32) {
+    let mut w = world();
+    let post = w.create_body(&BodyDef::fixed(Pos::new(0.0, 3.0, 0.0)));
+    let b = w.create_body(&BodyDef::dynamic(Pos::new(0.0, 3.0, 0.0)));
+    w.create_box_shape(b, &ShapeDef::default(), Vec3::splat(0.5));
+    let frame = Transform::new(Vec3::ZERO, Quat::from_rotation_z(core::f32::consts::FRAC_PI_2));
+    let j = make(&mut w, post, b, frame);
+    for _ in 0..120 {
+        w.step(DT, SUBSTEPS);
+    }
+    (w.joint_constraint_force(j), w.body_mass(b) * -w.gravity().y)
+}
+
+fn assert_holds_weight(name: &str, (force, weight): (Vec3, f32)) {
+    println!("{name}: force {force:?}, weight {weight}");
+    assert!((force.y - weight).abs() < 0.01 * weight, "{name}: force {force:?} should hold the weight {weight} up");
+    assert!(force.x.abs() < 0.01 * weight && force.z.abs() < 0.01 * weight, "{name}: force {force:?} off vertical");
+}
+
+#[test]
+fn prismatic_force_is_in_the_joint_frame() {
+    // Slides along x: the weight is held by the perpendicular rows.
+    assert_holds_weight(
+        "perpendicular",
+        settled_force(|w, a, b, _| w.create_prismatic_joint(&PrismaticJointDef::new(a, b)).joint()),
+    );
+    // Slides up: resting on the lower limit.
+    assert_holds_weight(
+        "lower limit",
+        settled_force(|w, a, b, up| {
+            w.create_prismatic_joint(
+                &PrismaticJointDef::new(a, b).local_frame_a(up).local_frame_b(up).enable_limit(true).translation_range(-0.2, 0.2),
+            )
+            .joint()
+        }),
+    );
+    // Slides down: hanging on the upper limit, which pushes against the axis.
+    let down = Transform::new(Vec3::ZERO, Quat::from_rotation_z(-core::f32::consts::FRAC_PI_2));
+    assert_holds_weight(
+        "upper limit",
+        settled_force(|w, a, b, _| {
+            w.create_prismatic_joint(
+                &PrismaticJointDef::new(a, b).local_frame_a(down).local_frame_b(down).enable_limit(true).translation_range(-0.2, 0.2),
+            )
+            .joint()
+        }),
+    );
+}
+
+#[test]
+fn wheel_force_is_in_the_joint_frame() {
+    // Suspension along x: the weight is held by the perpendicular rows.
+    assert_holds_weight(
+        "perpendicular",
+        settled_force(|w, a, b, _| w.create_wheel_joint(&WheelJointDef::new(a, b)).joint()),
+    );
+    // Suspension up, no spring: resting on the lower limit.
+    assert_holds_weight(
+        "lower limit",
+        settled_force(|w, a, b, up| {
+            w.create_wheel_joint(
+                &WheelJointDef::new(a, b)
+                    .local_frame_a(up)
+                    .local_frame_b(up)
+                    .enable_suspension_spring(false)
+                    .enable_suspension_limit(true)
+                    .suspension_range(-0.2, 0.2),
+            )
+            .joint()
+        }),
+    );
+    // Suspension up on its spring.
+    assert_holds_weight(
+        "spring",
+        settled_force(|w, a, b, up| {
+            w.create_wheel_joint(
+                &WheelJointDef::new(a, b).local_frame_a(up).local_frame_b(up).suspension_hertz(2.0).suspension_damping_ratio(1.0),
+            )
+            .joint()
+        }),
+    );
+}
