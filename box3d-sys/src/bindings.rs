@@ -7011,4 +7011,11 @@ unsafe extern "C" {
     pub fn b3Contact_IsValid(id: b3ContactId) -> bool;
     #[doc = " Get the manifolds for a contact. The manifold may have no points if the contact is not touching."]
     pub fn b3Contact_GetData(contactId: b3ContactId) -> b3ContactData;
+    #[doc = " Get the user material ids of both shapes where a contact point touches, as hit events report them:\n a mesh or height field gives the material of the point's triangle, a compound its child's material and\n a convex shape its own. Pass the triangleIndex of one of the contact's manifold points; a negative\n index gives each shape's first material."]
+    pub fn b3Contact_GetUserMaterialIds(
+        contactId: b3ContactId,
+        triangleIndex: ::core::ffi::c_int,
+        userMaterialIdA: *mut u64,
+        userMaterialIdB: *mut u64,
+    );
 }

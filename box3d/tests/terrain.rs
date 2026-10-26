@@ -436,3 +436,128 @@ fn mesh_material_index_out_of_range_panics() {
     assert_eq!(w.shape_mesh_material_count(s), 1);
     w.shape_mesh_material(s, 1);
 }
+
+/// 21 x 21 flat field at y = 0 over [-10, 10]^2 once its body sits at
+/// (-10, 0, -10): cells with world z < 0 take material 0, the rest material 1.
+fn two_material_field() -> HeightField {
+    let n = 21u32;
+    let heights = vec![0.0; (n * n) as usize];
+    let mats: Vec<u8> = (0..(n - 1) * (n - 1)).map(|c| u8::from(c / (n - 1) >= 10)).collect();
+    HeightField::new(&HeightFieldDef::new(&heights, n, n, Vec3::ONE).material_indices(&mats)).expect("height field")
+}
+
+/// A ball of radius 0.5 started at 3 m/s along +x from x = -8 at world `z`.
+fn rolling_ball(w: &mut World, z: f32) -> BodyId {
+    let b = w.create_body(&BodyDef::dynamic(Pos::new(-8.0, 0.5, z.into())).linear_velocity(Vec3::new(3.0, 0.0, 0.0)));
+    w.create_sphere_shape(b, &ShapeDef::default(), Vec3::ZERO, 0.5);
+    b
+}
+
+#[test]
+fn rolling_resistance_follows_height_field_cells() {
+    let mut w = world();
+    let hf = two_material_field();
+    let g = w.create_body(&BodyDef::fixed(Pos::new(-10.0, 0.0, -10.0)));
+    let materials = [SurfaceMaterial::default(), SurfaceMaterial::default().rolling_resistance(0.3)];
+    w.create_height_field_shape(g, &ShapeDef::default().mesh_materials(&materials), &hf);
+    let free = rolling_ball(&mut w, -5.0);
+    let held = rolling_ball(&mut w, 5.0);
+    for _ in 0..120 {
+        w.step(DT, SUBSTEPS);
+    }
+    let (xf, xh) = (w.body_position(free).x as f32, w.body_position(held).x as f32);
+    let (vf, vh) = (w.body_linear_velocity(free).length(), w.body_linear_velocity(held).length());
+    println!("free ball x {xf} v {vf}, held ball x {xh} v {vh}");
+    assert!(xf > -4.5 && vf > 1.0, "a ball on material 0 rolls on: x {xf} v {vf}");
+    assert!(vh < 0.05, "a ball on material 1 (rolling resistance 0.3) stops: v {vh}");
+    assert!(xh < xf - 2.0, "the held ball stops short: {xh} vs {xf}");
+}
+
+#[test]
+fn rolling_resistance_follows_mesh_triangles() {
+    let mut w = world();
+    let (v, t) = grid(20, 1.0);
+    // Triangles with z > 0 take material 1.
+    let mats: Vec<u8> = t.iter().map(|tri| u8::from(tri.iter().map(|&i| v[i as usize].z).sum::<f32>() > 0.0)).collect();
+    let mesh = Mesh::new(&MeshDef::new(&v, &t).identify_edges(true).material_indices(&mats)).unwrap();
+    let materials = [SurfaceMaterial::default(), SurfaceMaterial::default().rolling_resistance(0.3)];
+    let g = w.create_body(&BodyDef::fixed(Pos::ZERO));
+    w.create_mesh_shape(g, &ShapeDef::default().mesh_materials(&materials), &mesh, Vec3::ONE);
+    let free = rolling_ball(&mut w, -5.0);
+    let held = rolling_ball(&mut w, 5.0);
+    for _ in 0..120 {
+        w.step(DT, SUBSTEPS);
+    }
+    let (vf, vh) = (w.body_linear_velocity(free).length(), w.body_linear_velocity(held).length());
+    println!("mesh: free ball v {vf}, held ball v {vh}");
+    assert!(vf > 1.0, "a ball on material 0 rolls on: v {vf}");
+    assert!(vh < 0.05, "a ball on material 1 stops: v {vh}");
+}
+
+#[test]
+fn rolling_resistance_of_a_single_material_mesh_mixes_as_the_max() {
+    // As in convex contacts, the larger of the two materials' resistances acts:
+    // the ground's stops a ball that has none of its own.
+    let mut w = world();
+    mesh_ground(&mut w, &ShapeDef::default().rolling_resistance(0.3));
+    let b = rolling_ball(&mut w, 0.3);
+    for _ in 0..120 {
+        w.step(DT, SUBSTEPS);
+    }
+    let v = w.body_linear_velocity(b).length();
+    assert!(v < 0.05, "the mesh's rolling resistance stops the ball: v {v}");
+}
+
+#[test]
+fn contacts_report_the_height_field_cell_material() {
+    let mut w = world();
+    let hf = two_material_field();
+    let g = w.create_body(&BodyDef::fixed(Pos::new(-10.0, 0.0, -10.0)));
+    let materials = [SurfaceMaterial::default().user_material_id(7), SurfaceMaterial::default().user_material_id(9)];
+    let field = w.create_height_field_shape(g, &ShapeDef::default().mesh_materials(&materials), &hf);
+    let crate_def = ShapeDef::default().material(SurfaceMaterial::default().user_material_id(3)).enable_contact_events(true);
+    // One box on material 1, one straddling the seam at z = 0.
+    let on_one = w.create_body(&BodyDef::dynamic(Pos::new(2.5, 0.6, 4.5)));
+    let one_shape = w.create_box_shape(on_one, &crate_def, Vec3::splat(0.5));
+    let straddling = w.create_body(&BodyDef::dynamic(Pos::new(-4.5, 0.6, 0.0)));
+    w.create_box_shape(straddling, &crate_def, Vec3::new(0.5, 0.5, 0.9));
+
+    // The begin-touch event's contact names the cell's material.
+    let mut begun = false;
+    for _ in 0..30 {
+        w.step(DT, SUBSTEPS);
+        for e in w.contact_events().begin() {
+            if e.shape_a() != one_shape && e.shape_b() != one_shape {
+                continue;
+            }
+            let c = w.begin_contact(e).expect("begin contact is live");
+            let field_is_a = c.shape_a() == field;
+            let point = c.manifolds().iter().flat_map(|m| m.points()).next().expect("a point");
+            let (a, b) = c.user_materials(point);
+            assert_eq!(if field_is_a { (a, b) } else { (b, a) }, (9, 3));
+            begun = true;
+        }
+    }
+    assert!(begun, "the box began touching the field");
+
+    // Resting contacts name each point's cell.
+    let mut scratch = ContactScratch::new();
+    let mut seen = Vec::new();
+    for body in [on_one, straddling] {
+        let mut ids = Vec::new();
+        w.visit_body_contacts(body, &mut scratch, |c| {
+            for p in c.manifolds().iter().flat_map(|m| m.points()) {
+                let (a, b) = c.user_materials(p);
+                let (ground, other) = if c.shape_a() == field { (a, b) } else { (b, a) };
+                assert_eq!(other, 3);
+                let cell = p.triangle_index() >> 1;
+                assert_eq!(ground, if cell / 20 >= 10 { 9 } else { 7 }, "triangle {}", p.triangle_index());
+                ids.push(ground);
+            }
+        });
+        ids.sort();
+        ids.dedup();
+        seen.push(ids);
+    }
+    assert_eq!(seen, [vec![9], vec![7, 9]], "the straddling box touches both cells' materials");
+}

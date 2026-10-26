@@ -2,13 +2,16 @@
 //!
 //! [`World::visit_body_contacts`] copies Box3D's contact headers into a
 //! reusable [`ContactScratch`] (no allocation once it has grown) and hands
-//! each one to a callback. The manifolds are borrowed straight from Box3D's
-//! internal storage; the higher-ranked callback keeps them from escaping, so
-//! nothing outlives the next step.
+//! each one to a callback; [`World::begin_contact`] reads the contact a
+//! begin-touch event names. The manifolds are borrowed straight from Box3D's
+//! internal storage; the borrow of the world (or the higher-ranked callback)
+//! keeps them from escaping, so nothing outlives the next step.
 
+use crate::events::ContactBeginEvent;
 use crate::id::{BodyId, ShapeId};
 use crate::math::from_v3;
 use crate::{Vec3, World, sys};
+use core::marker::PhantomData;
 
 /// Reusable buffer for [`World::visit_body_contacts`].
 #[derive(Default)]
@@ -24,7 +27,7 @@ impl ContactScratch {
 /// normals point from shape A to shape B; the body being visited may be
 /// either side (compare [`World::shape_body`] of [`Self::shape_a`]).
 #[derive(Clone, Copy)]
-pub struct ContactData<'a>(&'a sys::b3ContactData);
+pub struct ContactData<'a>(sys::b3ContactData, PhantomData<&'a World>);
 
 impl<'a> ContactData<'a> {
     pub fn shape_a(&self) -> ShapeId {
@@ -32,6 +35,17 @@ impl<'a> ContactData<'a> {
     }
     pub fn shape_b(&self) -> ShapeId {
         ShapeId(self.0.shapeIdB)
+    }
+    /// Both shapes' user material ids where `point`, one of this contact's
+    /// manifold points, touches, as [`crate::ContactHitEvent`] reports them:
+    /// a mesh or height field gives its triangle's material, a convex shape
+    /// its own ([`crate::SurfaceMaterial::user_material_id`]).
+    pub fn user_materials(&self, point: &ManifoldPoint) -> (u64, u64) {
+        let (mut a, mut b) = (0, 0);
+        // SAFETY: the contact is live while this borrow of the world lasts (a
+        // step needs `&mut World`), and the triangle is one of its points'.
+        unsafe { sys::b3Contact_GetUserMaterialIds(self.0.contactId, point.0.triangleIndex, &mut a, &mut b) };
+        (a, b)
     }
     /// One manifold for convex pairs; mesh and height-field contacts can have several.
     pub fn manifolds(&self) -> &'a [Manifold] {
@@ -94,6 +108,12 @@ impl ManifoldPoint {
     pub fn total_normal_impulse(&self) -> f32 {
         self.0.totalNormalImpulse
     }
+    /// The mesh or height-field triangle this point touches (a field's
+    /// numbering is in [`crate::HeightFieldDef`]); meaningless for convex
+    /// pairs.
+    pub fn triangle_index(&self) -> i32 {
+        self.0.triangleIndex
+    }
     pub fn as_raw(&self) -> &sys::b3ManifoldPoint {
         &self.0
     }
@@ -120,7 +140,18 @@ impl World {
         // SAFETY: the first `n` entries were initialized by Box3D.
         unsafe { buf.set_len(n.min(capacity)) };
         for c in buf.iter() {
-            f(ContactData(c));
+            f(ContactData(*c, PhantomData));
         }
+    }
+
+    /// The contact a begin-touch event names, as it stands after the step:
+    /// `None` if it is gone (a shape destroyed since) or the event is another
+    /// world's.
+    pub fn begin_contact(&self, event: &ContactBeginEvent) -> Option<ContactData<'_>> {
+        let id = event.0.contactId;
+        // SAFETY: a valid contact of this world; its manifolds live until the
+        // next step, which needs `&mut World`.
+        (id.world0 == self.index0() && unsafe { sys::b3Contact_IsValid(id) })
+            .then(|| ContactData(unsafe { sys::b3Contact_GetData(id) }, PhantomData))
     }
 }
